@@ -20,6 +20,8 @@ class MonteCarloResults:
     capex_variations: np.ndarray
     iterations_bpb: np.ndarray
     reference_bpb: float
+    iterations_npv: np.ndarray
+    reference_npv: float
     delay_stiffness: float
     capex_stiffness: float
     eoh_stiffness: float
@@ -31,9 +33,9 @@ class MonteCarloResults:
 
     @classmethod
     def from_tuple(cls, result):
-        if len(result) != 22:
-            raise ValueError(f"my_irr_mc_function ha restituito {len(result)} elementi anziche 22")
-        array_indexes = {0, 2, 3, 5, 6, 8, 9, 11, 12, 17, 18, 19, 20, 21}
+        if len(result) != 24:
+            raise ValueError(f"my_irr_mc_function ha restituito {len(result)} elementi anziche 24")
+        array_indexes = {0, 2, 3, 5, 6, 8, 9, 11, 12, 14, 19, 20, 21, 22, 23}
         values = [np.asarray(v) if i in array_indexes else v for i, v in enumerate(result)]
         return cls(*values)
 

@@ -526,6 +526,13 @@ def generate_operating_profiles(
     )
     return unavailabilities, energy_prices, opexes
 
+def evaluate_npv(cash_flows, annual_wacc=0.0606):
+    """Calculate NPV in M€ from monthly cash flows using an effective annual WACC."""
+    if annual_wacc <= -1:
+        raise ValueError("Annual WACC must be greater than -100%")
+    monthly_rate = (1.0 + annual_wacc) ** (1.0 / 12.0) - 1.0
+    return sum(cf / (1.0 + monthly_rate) ** month for month, cf in enumerate(cash_flows))
+
 def calculate_cash_flow_metrics(
     capex_flows,
     revenues_flows,
@@ -534,8 +541,9 @@ def calculate_cash_flow_metrics(
     irr_guess,
     irr_tol,
     irr_max_iter,
+    wacc,
 ):
-    """Build net cash flows and calculate annual IRR and payback period."""
+    """Build net cash flows and calculate annual IRR, NPV and payback period."""
     cash_flows = [
         -capex + revenue - tax - opex
         for capex, revenue, tax, opex in zip(
@@ -552,7 +560,8 @@ def calculate_cash_flow_metrics(
             break
 
     _, irr = evaluate_irr(cash_flows, irr_guess, irr_tol, irr_max_iter)
-    return cash_flows, irr, pbp
+    npv = evaluate_npv(cash_flows, wacc)
+    return cash_flows, irr, npv, pbp
 
 def calculate_project_flows(
     actual_capex,
@@ -579,6 +588,7 @@ def calculate_project_flows(
     irr_guess,
     irr_tol,
     irr_max_iter,
+    wacc,
 ):
     """Calculate all technical and financial flows for one project case."""
     mean_eoh = [100.0] * 12 if mean_eoh is None else mean_eoh
@@ -624,7 +634,7 @@ def calculate_project_flows(
         capex_depreciation_ratio,
         capex_depreciation_time,
     )
-    _, irr, pbp = calculate_cash_flow_metrics(
+    _, irr, npv, pbp = calculate_cash_flow_metrics(
         capex_flows,
         revenues_flows,
         taxes_flows,
@@ -632,11 +642,13 @@ def calculate_project_flows(
         irr_guess,
         irr_tol,
         irr_max_iter,
+        wacc,
     )
     return (
         irr,
         sum(eoh),
         pbp,
+        npv,
         capex_flows,
         eoh,
         unavailabilities,
@@ -671,6 +683,7 @@ def simulate_irr(
     irr_guess=0.01,
     irr_tol=1e-10,
     irr_max_iter=1000,
+    wacc=WACC,
 ):
     """Simulate one project case and return annual IRR, EOH and PBP."""
     result = calculate_project_flows(
@@ -698,8 +711,9 @@ def simulate_irr(
         irr_guess,
         irr_tol,
         irr_max_iter,
+        wacc,
     )
-    return result[:3]
+    return result[:4]
 
 def generate_flows(
     stochastic_capex=STOCHASTIC_CAPEX,
@@ -736,6 +750,7 @@ def generate_flows(
     irr_guess=IRR_GUESS,
     irr_tol=IRR_TOL,
     irr_max_iter=IRR_MAX_ITER,
+    wacc=WACC,
 ):
     """Sample one case and return its complete technical and financial flows."""
     actual_capex = (
@@ -787,6 +802,7 @@ def generate_flows(
         irr_guess,
         irr_tol,
         irr_max_iter,
+        wacc,
     )
 
 def monte_carlo_irr(
@@ -826,6 +842,7 @@ def monte_carlo_irr(
     irr_guess=IRR_GUESS,
     irr_tol=IRR_TOL,
     irr_max_iter=IRR_MAX_ITER,
+    wacc=WACC,
 ):
     if stochastic_delay:
         iterations_time_to_cod = time_to_cod_generator(
@@ -854,10 +871,11 @@ def monte_carlo_irr(
             iterations_time_to_cod, iterations_capex, capex_delay_correlation
         )
     iterations_bpb = []
+    iterations_npv = []
     iterations_irr = []
     iterations_eoh = []
     for actual_capex, actual_time_to_cod in zip(iterations_capex, iterations_time_to_cod):
-        actual_irr, actual_eoh, actual_pbp = simulate_irr(
+        actual_irr, actual_eoh, actual_pbp, actual_npv = simulate_irr(
             actual_capex,
             actual_time_to_cod,
             start_month,
@@ -882,11 +900,13 @@ def monte_carlo_irr(
             irr_guess,
             irr_tol,
             irr_max_iter,
+            wacc,
         )
         iterations_irr.append(actual_irr)
         iterations_eoh.append(actual_eoh)
         iterations_bpb.append(actual_pbp)
-    return iterations_irr, iterations_eoh, iterations_time_to_cod, iterations_capex, iterations_bpb
+        iterations_npv.append(actual_npv)
+    return iterations_irr, iterations_eoh, iterations_time_to_cod, iterations_capex, iterations_bpb, iterations_npv
 
 def calculate_stiffness(
     nominal_time_to_cod=NOMINAL_TIME_TO_COD,
@@ -912,6 +932,7 @@ def calculate_stiffness(
     irr_guess=IRR_GUESS,
     irr_tol=IRR_TOL,
     irr_max_iter=IRR_MAX_ITER,
+    wacc=WACC,
     capex_stress=CAPEX_STRESS,
     delay_stress=DELAY_STRESS,
     eoh_stress=EOH_STRESS,
@@ -947,6 +968,7 @@ def calculate_stiffness(
         irr_guess=irr_guess,
         irr_tol=irr_tol,
         irr_max_iter=irr_max_iter,
+        wacc=wacc,
     )
     reference = monte_carlo_irr(**common)
     capex_result = monte_carlo_irr(
@@ -971,6 +993,7 @@ def calculate_stiffness(
         reference[2][0],
         reference[3][0],
         reference[4][0],
+        reference[5][0],
     )
 
 def my_irr_mc_function(
@@ -1010,11 +1033,12 @@ def my_irr_mc_function(
     irr_guess=IRR_GUESS,
     irr_tol=IRR_TOL,
     irr_max_iter=IRR_MAX_ITER,
+    wacc=WACC,
     capex_stress=CAPEX_STRESS,
     delay_stress=DELAY_STRESS,
     eoh_stress=EOH_STRESS,
 ):
-    iterations_irr, iterations_eoh, iterations_time_to_cod, iterations_capex, iterations_bpb = (
+    iterations_irr, iterations_eoh, iterations_time_to_cod, iterations_capex, iterations_bpb, iterations_npv = (
         monte_carlo_irr(
             stochastic_capex,
             stochastic_delay,
@@ -1052,6 +1076,7 @@ def my_irr_mc_function(
             irr_guess,
             irr_tol,
             irr_max_iter,
+            wacc,
         )
     )
     (
@@ -1063,6 +1088,7 @@ def my_irr_mc_function(
         reference_time_to_cod,
         reference_capex,
         reference_pbp,
+        reference_npv,
     ) = calculate_stiffness(
         nominal_time_to_cod=nominal_time_to_cod,
         nominal_capex=nominal_capex,
@@ -1087,6 +1113,7 @@ def my_irr_mc_function(
         irr_guess=irr_guess,
         irr_tol=irr_tol,
         irr_max_iter=irr_max_iter,
+        wacc=wacc,
         capex_stress=capex_stress,
         delay_stress=delay_stress,
         eoh_stress=eoh_stress,
@@ -1118,6 +1145,8 @@ def my_irr_mc_function(
         capex_variations,
         iterations_bpb,
         reference_pbp,
+        iterations_npv,
+        reference_npv,
         delay_stiffness,
         capex_stiffness,
         eoh_stiffness,

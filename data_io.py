@@ -51,6 +51,7 @@ def export_generated_flows_to_excel(input_parameters, generated_flows, path, inp
         irr,
         actual_eoh,
         pbp,
+        npv,
         capex_flows,
         eoh,
         unavailabilities,
@@ -98,6 +99,7 @@ def export_generated_flows_to_excel(input_parameters, generated_flows, path, inp
     inputs_sheet.append(["IRR (%)", float(irr)])
     inputs_sheet.append(["Actual EOH (h)", float(actual_eoh)])
     inputs_sheet.append(["PBP (y)", float(pbp)])
+    inputs_sheet.append(["NPV (M€)", float(npv)])
     inputs_sheet.column_dimensions["A"].width = 38
     inputs_sheet.column_dimensions["B"].width = 24
     inputs_sheet.freeze_panes = "A2"

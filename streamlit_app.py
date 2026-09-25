@@ -115,6 +115,7 @@ DISTRIBUTIONS = {
     "CAPEX (M€)": ("iterations_capex", "CAPEX (M€)", False),
     "CAPEX Variation (%)": ("capex_variations", "CAPEX Variation (%)", False),
     "IRR Variation (bps)": ("irr_variations", "IRR Variation (bps)", False),
+    "NPV (M€)": ("iterations_npv", "NPV (M€)", False),
 }
 SCATTER_VARIABLES = {
     "IRR (%)": ("iterations_irr", "IRR (%)", 100.0),
@@ -126,6 +127,7 @@ SCATTER_VARIABLES = {
     "CAPEX (M€)": ("iterations_capex", "CAPEX (M€)", 1.0),
     "CAPEX Variation (%)": ("capex_variations", "CAPEX Variation (%)", 1.0),
     "PBP (y)": ("iterations_bpb", "PBP (y)", 1.0),
+    "NPV (M€)": ("iterations_npv", "NPV (M€)", 1.0),
 }
 
 st.markdown(f"""
@@ -566,6 +568,7 @@ def input_defaults():
         "unavailability_profile": None,
         "opex_profile": None,
         "tax_rate": float(TAX_RATE),
+        "wacc": float(WACC),
         "capex_depreciation_ratio": float(CAPEX_DEPRECIATION_RATIO),
         "capex_depreciation_time": int(CAPEX_DEPRECIATION_TIME),
         "delay_min": int(DELAY_MIN),
@@ -592,6 +595,7 @@ def single_iteration_workbook(generated, params):
         irr,
         actual_eoh,
         pbp,
+        npv,
         capex,
         eoh,
         unavailability,
@@ -637,6 +641,7 @@ def single_iteration_workbook(generated, params):
     results_sheet = workbook.create_sheet("Iteration Results")
     results_sheet.append(["Result", "Value", "Unit"])
     results_sheet.append(["IRR", float(irr), "%"])
+    results_sheet.append(["NPV", float(npv), "M€"])
     results_sheet.append(["PBP", float(pbp), "years"])
     results_sheet.append(["Actual CAPEX", float(capex.sum()), "M€"])
     results_sheet.append(["Actual Time to COD", actual_time_to_cod, "months"])
@@ -646,10 +651,11 @@ def single_iteration_workbook(generated, params):
     results_sheet.column_dimensions["B"].width = 18
     results_sheet.column_dimensions["C"].width = 14
     results_sheet["B2"].number_format = "0.00%"
-    results_sheet["B3"].number_format = "0.00"
-    results_sheet["B4"].number_format = "0.000"
-    results_sheet["B5"].number_format = "0"
-    results_sheet["B6"].number_format = "#,##0.00"
+    results_sheet["B3"].number_format = "#,##0.000"
+    results_sheet["B4"].number_format = "0.00"
+    results_sheet["B5"].number_format = "0.000"
+    results_sheet["B6"].number_format = "0"
+    results_sheet["B7"].number_format = "#,##0.00"
 
     flows_sheet = workbook.create_sheet("Monthly Flows")
     headers = [
@@ -729,6 +735,8 @@ def validate(params):
         raise ValueError("Minimum Delay <= Most Likely Delay <= Maximum Delay must hold")
     if not params["capex_variation_min"] <= params["capex_variation_ml"] <= params["capex_variation_max"]:
         raise ValueError("Minimum CAPEX variation <= Most Likely <= Maximum must hold")
+    if params["wacc"] <= -1:
+        raise ValueError("Annual WACC must be greater than -100%")
     if any(v < 0 for v in params["std_eoh"]):
         raise ValueError("EOH coefficients of variation cannot be negative")
     if any(v < 0 for v in params["unavailability_parameters"]):
@@ -799,6 +807,13 @@ def input_panel(defaults=None):
             min_value=0.0,
             value=float(d("tax_rate", TAX_RATE)),
             format="%.4f",
+        )
+        wacc = st.number_input(
+            "Annual WACC (1 = 100%)",
+            min_value=0.0,
+            value=float(d("wacc", WACC)),
+            format="%.4f",
+            help="Effective annual discount rate used to calculate NPV from monthly cash flows.",
         )
         depreciation_ratio = st.number_input(
             "Depreciable CAPEX Ratio",
@@ -1065,7 +1080,7 @@ def input_panel(defaults=None):
         "unavailability_parameters": [u0, us, int(ur), ua], "opex": opex, "energy_price_at_cod": energy_price,
         "annual_price_variation": annual_price, "energy_price_profile": st.session_state.energy_price_profile,
         "unavailability_profile": st.session_state.unavailability_profile, "opex_profile": st.session_state.opex_profile,
-        "tax_rate": tax_rate, "capex_depreciation_ratio": depreciation_ratio, "capex_depreciation_time": int(depreciation_time),
+        "tax_rate": tax_rate, "wacc": wacc, "capex_depreciation_ratio": depreciation_ratio, "capex_depreciation_time": int(depreciation_time),
         "delay_min": int(delay_min), "delay_ml": delay_ml, "delay_max": int(delay_max), "delay_distribution_sharpness": delay_sharpness,
         "capex_variation_min": capex_min, "capex_variation_ml": capex_ml, "capex_variation_max": capex_max,
         "capex_distribution_sharpness": capex_sharpness, "capex_curve_inflection": inflection, "capex_curve_steepness": steepness,
@@ -1086,10 +1101,12 @@ def run_single(params):
 
 
 def summary(results):
-    irr, pbp = finite(results.iterations_irr), finite(results.iterations_bpb)
+    irr, pbp, npv = finite(results.iterations_irr), finite(results.iterations_bpb), finite(results.iterations_npv)
     metrics = [
         ("Reference IRR", f"{results.reference_irr:.2%}"), ("Mean IRR", f"{np.mean(irr):.2%}"),
         ("Median IRR", f"{np.median(irr):.2%}"), ("P5 IRR", f"{np.percentile(irr,5):.2%}"), ("P95 IRR", f"{np.percentile(irr,95):.2%}"),
+        ("Reference NPV", f"{results.reference_npv:.2f} M€"), ("Mean NPV", f"{np.mean(npv):.2f} M€"),
+        ("Median NPV", f"{np.median(npv):.2f} M€"), ("P5 NPV", f"{np.percentile(npv,5):.2f} M€"), ("P95 NPV", f"{np.percentile(npv,95):.2f} M€"),
         ("Reference PBP", f"{results.reference_bpb:.2f} y"), ("Mean PBP", f"{np.mean(pbp):.2f} y"),
         ("Median PBP", f"{np.median(pbp):.2f} y"), ("P5 PBP", f"{np.percentile(pbp,5):.2f} y"), ("P95 PBP", f"{np.percentile(pbp,95):.2f} y"),
         ("Delay Stiffness", f"{results.delay_stiffness:.0f}"), ("CAPEX Stiffness", f"{results.capex_stiffness:.0f}"), ("EOH Stiffness", f"{results.eoh_stiffness:.0f}"),
@@ -1099,10 +1116,11 @@ def summary(results):
 
 
 def results_tabs(results):
-    t1, t2, t3, t4 = st.tabs(["IRR & PBP Histograms", "Monte Carlo vs Linear Model", "Other Histograms", "Scatter Plot"])
+    t1, t2, t3, t4 = st.tabs(["IRR, NPV & PBP Histograms", "Monte Carlo vs Linear Model", "Other Histograms", "Scatter Plot"])
     with t1:
         bins = st.slider("Bins", 5, 150, 35, key="main_bins")
         show_plotly(interactive_histogram(np.asarray(results.iterations_irr) * 100, results.reference_irr * 100, "IRR Distribution", "IRR (%)", bins), "irr_hist")
+        show_plotly(interactive_histogram(results.iterations_npv, results.reference_npv, "NPV Distribution", "NPV (M€)", bins), "npv_hist")
         show_plotly(interactive_histogram(results.iterations_bpb, results.reference_bpb, "PBP Distribution", "PBP (y)", bins), "pbp_hist")
     with t2:
         x=np.asarray(results.percentiles_points); mc=np.asarray(results.irr_percentiles); linear=np.asarray(results.linear_irr_percentiles); error=np.asarray(results.linear_irr_error)
@@ -1115,7 +1133,7 @@ def results_tabs(results):
         show_plotly(fig,"mc_linear")
     with t3:
         c1,c2=st.columns([3,1]); choice=c1.selectbox("Variable",list(DISTRIBUTIONS)); bins=c2.number_input("Bins",5,150,35)
-        attr,xlabel,discrete=DISTRIBUTIONS[choice]; refs={"EOH":results.reference_eoh,"EOH Variation (%)":0,"Time to COD (m)":results.reference_time_to_cod,"Delay (m)":0,"CAPEX (M€)":results.reference_capex,"CAPEX Variation (%)":0,"IRR Variation (bps)":0}
+        attr,xlabel,discrete=DISTRIBUTIONS[choice]; refs={"EOH":results.reference_eoh,"EOH Variation (%)":0,"Time to COD (m)":results.reference_time_to_cod,"Delay (m)":0,"CAPEX (M€)":results.reference_capex,"CAPEX Variation (%)":0,"IRR Variation (bps)":0,"NPV (M€)":results.reference_npv}
         show_plotly(interactive_histogram(getattr(results,attr),refs[choice],choice,xlabel,int(bins),discrete),"other_hist")
     with t4:
         c1,c2=st.columns(2); xname=c1.selectbox("X axis",list(SCATTER_VARIABLES),index=5); yname=c2.selectbox("Y axis",list(SCATTER_VARIABLES),index=7)
@@ -1129,11 +1147,11 @@ def results_tabs(results):
         show_plotly(fig,"scatter")
 
 def single_iteration_view(generated, params):
-    irr, actual_eoh, pbp, capex, eoh, unavailability, price, revenues, taxes, opex = generated
+    irr, actual_eoh, pbp, npv, capex, eoh, unavailability, price, revenues, taxes, opex = generated
     arrays = [np.asarray(v,float) for v in (capex,eoh,unavailability,price,revenues,taxes,opex)]
     capex,eoh,unavailability,price,revenues,taxes,opex = arrays
     total=len(capex); cod=total-int(params["operational_life"])*12; months=np.arange(1,total+1); net=-capex+revenues-opex-taxes; cumulative=np.cumsum(net)
-    c=st.columns(5); c[0].metric("IRR",f"{irr:.2%}"); c[1].metric("PBP",f"{pbp:.2f} y"); c[2].metric("Actual CAPEX",f"{capex.sum():.2f} M€"); c[3].metric("Actual Time to COD",f"{cod} m"); c[4].metric("Total EOH",f"{actual_eoh:,.0f} h")
+    c=st.columns(6); c[0].metric("IRR",f"{irr:.2%}"); c[1].metric("NPV",f"{npv:.2f} M€"); c[2].metric("PBP",f"{pbp:.2f} y"); c[3].metric("Actual CAPEX",f"{capex.sum():.2f} M€"); c[4].metric("Actual Time to COD",f"{cod} m"); c[5].metric("Total EOH",f"{actual_eoh:,.0f} h")
     st.download_button(
         "Download Single Iteration Excel",
         single_iteration_workbook(generated, params),
