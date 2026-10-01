@@ -89,11 +89,18 @@ def interactive_histogram(values, reference, title, xlabel, bins=35, discrete=Fa
     else:
         width = (values.max() - values.min()) / max(int(bins), 1)
         xbins = dict(size=width) if width > 0 else None
-    fig = go.Figure()
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
     fig.add_trace(go.Histogram(
         x=values, name="Frequency", marker=dict(color=CHART_BLUE, line=dict(color=BAR_OUTLINE, width=1.1)), opacity=0.84,
         xbins=xbins, hovertemplate="Range: %{x}<br>Frequency: %{y}<extra></extra>"
-    ))
+    ), secondary_y=False)
+    cumulative_x = np.sort(values)
+    cumulative_y = np.arange(1, cumulative_x.size + 1, dtype=float) / cumulative_x.size * 100.0
+    fig.add_trace(go.Scatter(
+        x=cumulative_x, y=cumulative_y, name="Cumulative", mode="lines",
+        line=dict(color=CHART_ORANGE, width=3),
+        hovertemplate="Value: %{x:.3f}<br>Cumulative: %{y:.1f}%<extra></extra>",
+    ), secondary_y=True)
     stats = [
         (reference, "Reference", CHART_SLATE, "solid"),
         (float(np.mean(values)), "Mean", CHART_ORANGE, "solid"),
@@ -104,7 +111,9 @@ def interactive_histogram(values, reference, title, xlabel, bins=35, discrete=Fa
     for value, label, color, dash in stats:
         fig.add_vline(x=value, line_width=2, line_color=color, line_dash=dash)
         fig.add_trace(go.Scatter(x=[None], y=[None], mode="lines", name=f"{label}: {value:.2f}", line=dict(color=color, dash=dash)))
-    return style_figure(fig, title, xlabel, "Frequency", 470, "x")
+    style_figure(fig, title, xlabel, "Frequency", 470, "x")
+    fig.update_yaxes(title_text="Cumulative (%)", range=[0, 100], ticksuffix="%", secondary_y=True)
+    return fig
 
 
 DISTRIBUTIONS = {
@@ -1253,6 +1262,8 @@ def single_iteration_view(generated, params):
         # 4. Overlaid revenue and cost bridge
         opex_base = revenues
         capex_base = revenues - opex
+        taxes_without_depreciation = np.maximum(revenues - opex, 0.0) * float(params["tax_rate"])
+        depreciation_benefit = np.maximum(taxes_without_depreciation - taxes, 0.0)
         bar_width = 0.76
 
         fig = go.Figure()
@@ -1278,6 +1289,20 @@ def single_iteration_view(generated, params):
                 marker=dict(color=CHART_GOLD, line=dict(color=BAR_OUTLINE, width=1.0)),
                 opacity=0.92,
                 hovertemplate="Month %{x}<br>Taxes: %{y:.3f} M€<extra></extra>",
+            )
+        )
+        fig.add_trace(
+            go.Bar(
+                x=months,
+                y=depreciation_benefit,
+                base=taxes,
+                width=bar_width * 0.56,
+                name="Depreciation Benefit",
+                marker=dict(
+                    color="rgba(0,0,0,0)",
+                    line=dict(color=CHART_GOLD, width=2.0, dash="dash"),
+                ),
+                hovertemplate="Month %{x}<br>Depreciation benefit: %{y:.3f} M€<extra></extra>",
             )
         )
         fig.add_trace(
