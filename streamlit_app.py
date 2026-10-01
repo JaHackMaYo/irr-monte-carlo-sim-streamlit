@@ -486,17 +486,86 @@ def params_workbook(params):
     profiles_sheet.column_dimensions["B"].width = 27
     profiles_sheet.column_dimensions["C"].width = 22
     profiles_sheet.column_dimensions["D"].width = 25
-
+    distribution_specs = [
+        (
+            "Delay Distribution",
+            "Use Delay Cumulative Curve",
+            "Delay (m)",
+            params.get("delay_cumulative_curve"),
+            [
+                (params["delay_min"], 0.0),
+                (params["delay_ml"], 50.0),
+                (params["delay_max"], 100.0),
+            ],
+        ),
+        (
+            "CAPEX Variation Distribution",
+            "Use CAPEX Variation Cumulative Curve",
+            "CAPEX Variation (%)",
+            params.get("capex_variation_cumulative_curve"),
+            [
+                (params["capex_variation_min"], 0.0),
+                (params["capex_variation_ml"], 50.0),
+                (params["capex_variation_max"], 100.0),
+            ],
+        ),
+    ]
+    for sheet_name, flag_label, value_label, active_curve, default_curve in distribution_specs:
+        distribution_sheet = workbook.create_sheet(sheet_name)
+        distribution_sheet.append([flag_label, active_curve is not None])
+        distribution_sheet.append([])
+        distribution_sheet.append([value_label, "Percentile (%)"])
+        curve = active_curve if active_curve is not None else default_curve
+        for value, percentile in curve:
+            distribution_sheet.append([float(value), float(percentile)])
+        distribution_sheet.freeze_panes = "A4"
+        distribution_sheet.column_dimensions["A"].width = 38
+        distribution_sheet.column_dimensions["B"].width = 20
     output = io.BytesIO()
     workbook.save(output)
     return output.getvalue()
 
 
+def _read_cumulative_curve_sheet(sheet, curve_name):
+    use_curve = _parse_boolean(sheet.cell(1, 2).value, sheet.cell(1, 1).value or curve_name)
+    points = []
+    for row_number in range(4, sheet.max_row + 1):
+        value = sheet.cell(row_number, 1).value
+        percentile = sheet.cell(row_number, 2).value
+        if value is None and percentile is None:
+            continue
+        if value is None or percentile is None:
+            raise ValueError(f"{curve_name}: both value and percentile are required at row {row_number}.")
+        points.append(
+            (
+                _parse_number(value, f"{curve_name} value at row {row_number}"),
+                _parse_number(percentile, f"{curve_name} percentile at row {row_number}"),
+            )
+        )
+    if len(points) < 2:
+        raise ValueError(f"{curve_name}: at least two points are required.")
+    values = [point[0] for point in points]
+    percentiles = [point[1] for point in points]
+    scale = 100.0 if max(percentiles) > 1.0 else 1.0
+    probabilities = [percentile / scale for percentile in percentiles]
+    if abs(probabilities[0]) > 1e-9 or abs(probabilities[-1] - 1.0) > 1e-9:
+        raise ValueError(f"{curve_name}: percentiles must start at 0 and end at 100%.")
+    if any(probabilities[index] >= probabilities[index + 1] for index in range(len(probabilities) - 1)):
+        raise ValueError(f"{curve_name}: percentiles must be strictly increasing.")
+    if any(values[index] > values[index + 1] for index in range(len(values) - 1)):
+        raise ValueError(f"{curve_name}: values must be non-decreasing.")
+    return use_curve, points
+
 def load_params_workbook(uploaded):
     """Load and validate the complete workbook exported by this application."""
     workbook = load_workbook(io.BytesIO(uploaded.getvalue()), data_only=True)
     try:
-        required_sheets = {"Inputs", "Operating Profiles"}
+        required_sheets = {
+            "Inputs",
+            "Operating Profiles",
+            "Delay Distribution",
+            "CAPEX Variation Distribution",
+        }
         missing = required_sheets.difference(workbook.sheetnames)
         if missing:
             raise ValueError(f"Missing worksheet: {', '.join(sorted(missing))}.")
@@ -605,6 +674,17 @@ def load_params_workbook(uploaded):
                     f"{key.replace('_', ' ').title()} series contains "
                     f"{len(values)} values; {expected_months} are required."
                 )
+        delay_flag, delay_curve = _read_cumulative_curve_sheet(
+            workbook["Delay Distribution"], "Delay cumulative curve"
+        )
+        capex_curve_flag, capex_curve = _read_cumulative_curve_sheet(
+            workbook["CAPEX Variation Distribution"],
+            "CAPEX variation cumulative curve",
+        )
+        flags["delay"] = delay_flag
+        flags["capex_variation"] = capex_curve_flag
+        profiles["delay"] = delay_curve
+        profiles["capex_variation"] = capex_curve
         return imported_inputs, profiles, flags
     finally:
         workbook.close()
@@ -1525,6 +1605,16 @@ def main():
                 st.session_state.unavailability_profile = (
                     list(imported_profiles["unavailability"])
                     if imported_flags["unavailability"]
+                    else None
+                )
+                st.session_state.delay_cumulative_curve = (
+                    list(imported_profiles["delay"])
+                    if imported_flags["delay"]
+                    else None
+                )
+                st.session_state.capex_variation_cumulative_curve = (
+                    list(imported_profiles["capex_variation"])
+                    if imported_flags["capex_variation"]
                     else None
                 )
                 st.session_state.mean_eoh = list(imported_inputs["mean_eoh"])
