@@ -1291,18 +1291,37 @@ def single_iteration_view(generated, params):
                 hovertemplate="Month %{x}<br>Taxes: %{y:.3f} M€<extra></extra>",
             )
         )
+        benefit_width = bar_width * 0.56
+        benefit_outline_x = []
+        benefit_outline_y = []
+        for month, tax, benefit in zip(months, taxes, depreciation_benefit):
+            if benefit <= 0:
+                continue
+            left = month - benefit_width / 2
+            right = month + benefit_width / 2
+            top = tax + benefit
+            benefit_outline_x.extend([left, left, right, right, left, None])
+            benefit_outline_y.extend([tax, top, top, tax, tax, None])
         fig.add_trace(
-            go.Bar(
-                x=months,
-                y=depreciation_benefit,
-                base=taxes,
-                width=bar_width * 0.56,
+            go.Scatter(
+                x=benefit_outline_x,
+                y=benefit_outline_y,
+                mode="lines",
                 name="Depreciation Benefit",
-                marker=dict(
-                    color="rgba(0,0,0,0)",
-                    line=dict(color=CHART_GOLD, width=2.0, dash="dash"),
-                ),
-                hovertemplate="Month %{x}<br>Depreciation benefit: %{y:.3f} M€<extra></extra>",
+                line=dict(color=CHART_GOLD, width=2.0, dash="dash"),
+                hoverinfo="skip",
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=months,
+                y=taxes + depreciation_benefit,
+                mode="markers",
+                name="Depreciation Benefit hover",
+                marker=dict(color="rgba(0,0,0,0)", size=10),
+                customdata=depreciation_benefit,
+                showlegend=False,
+                hovertemplate="Month %{x}<br>Depreciation benefit: %{customdata:.3f} M€<extra></extra>",
             )
         )
         fig.add_trace(
