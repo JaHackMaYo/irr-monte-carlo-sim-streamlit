@@ -6,6 +6,42 @@ from config import *
 
 from utils import correlate_data, get_percentile
 
+def inverse_transform_sample(cumulative_curve, size=1):
+    """Sample values from a user-supplied cumulative distribution.
+
+    ``cumulative_curve`` is a sequence of ``(value, percentile)`` pairs. The
+    percentile may be expressed either from 0 to 1 or from 0 to 100. Linear
+    interpolation of the inverse CDF is used between supplied points.
+    """
+    if cumulative_curve is None:
+        return None
+    points = [(float(value), float(percentile)) for value, percentile in cumulative_curve]
+    if len(points) < 2:
+        raise ValueError("A cumulative distribution requires at least two points.")
+    values = [point[0] for point in points]
+    percentiles = [point[1] for point in points]
+    if any(not math.isfinite(value) for value in values + percentiles):
+        raise ValueError("Cumulative distribution values must be finite.")
+    if any(values[index] > values[index + 1] for index in range(len(values) - 1)):
+        raise ValueError("Cumulative distribution values must be non-decreasing.")
+    scale = 100.0 if max(percentiles) > 1.0 else 1.0
+    probabilities = [percentile / scale for percentile in percentiles]
+    if abs(probabilities[0]) > 1e-9 or abs(probabilities[-1] - 1.0) > 1e-9:
+        raise ValueError("Cumulative distribution percentiles must start at 0 and end at 100%.")
+    if any(probabilities[index] >= probabilities[index + 1] for index in range(len(probabilities) - 1)):
+        raise ValueError("Cumulative distribution percentiles must be strictly increasing.")
+    output = []
+    for _ in range(int(size)):
+        u = random()
+        upper = 1
+        while upper < len(probabilities) and u > probabilities[upper]:
+            upper += 1
+        lower = upper - 1
+        span = probabilities[upper] - probabilities[lower]
+        weight = (u - probabilities[lower]) / span
+        output.append(values[lower] + weight * (values[upper] - values[lower]))
+    return output
+
 def time_to_cod_generator(
     nominal_time_to_cod=18,
     delay_min=-3,
@@ -13,6 +49,7 @@ def time_to_cod_generator(
     delay_ml=0,
     delay_distribution_sharpness=2,
     size=1,
+    cumulative_curve=None,
 ):
     """
     Generate time-to-COD values by applying a bounded delay distribution to
@@ -52,6 +89,9 @@ def time_to_cod_generator(
     Sampled delays are rounded to the nearest integer before being added to
     nominal_time_to_cod.
     """
+    if cumulative_curve is not None:
+        delays = inverse_transform_sample(cumulative_curve, size)
+        return [nominal_time_to_cod + round(delay) for delay in delays]
     output = []
     delay_min -= 0.5
     delay_max += 0.5
@@ -74,6 +114,7 @@ def capex_generator(
     capex_variation_ml=0,
     capex_distribution_sharpness=2,
     size=1,
+    cumulative_curve=None,
 ):
     """
     Generate one or more CAPEX values by applying a bounded random variation
@@ -107,6 +148,9 @@ def capex_generator(
         A single CAPEX value if size=1, otherwise a list containing
         size randomly generated CAPEX values.
     """
+    if cumulative_curve is not None:
+        variations = inverse_transform_sample(cumulative_curve, size)
+        return [nominal_capex * (1 + variation / 100.0) for variation in variations]
     capex_variation_min = capex_variation_min / 100.0
     capex_variation_max = capex_variation_max / 100.0
     capex_variation_ml = capex_variation_ml / 100.0
@@ -751,6 +795,8 @@ def generate_flows(
     irr_tol=IRR_TOL,
     irr_max_iter=IRR_MAX_ITER,
     wacc=WACC,
+    delay_cumulative_curve=None,
+    capex_variation_cumulative_curve=None,
 ):
     """Sample one case and return its complete technical and financial flows."""
     actual_capex = (
@@ -761,6 +807,7 @@ def generate_flows(
             capex_variation_ml,
             capex_distribution_sharpness,
             size=1,
+            cumulative_curve=capex_variation_cumulative_curve,
         )[0]
         if stochastic_capex
         else nominal_capex
@@ -773,6 +820,7 @@ def generate_flows(
             delay_ml,
             delay_distribution_sharpness,
             size=1,
+            cumulative_curve=delay_cumulative_curve,
         )[0]
         if stochastic_delay
         else nominal_time_to_cod
@@ -843,6 +891,8 @@ def monte_carlo_irr(
     irr_tol=IRR_TOL,
     irr_max_iter=IRR_MAX_ITER,
     wacc=WACC,
+    delay_cumulative_curve=None,
+    capex_variation_cumulative_curve=None,
 ):
     if stochastic_delay:
         iterations_time_to_cod = time_to_cod_generator(
@@ -852,6 +902,7 @@ def monte_carlo_irr(
             delay_ml,
             delay_distribution_sharpness,
             iterations,
+            cumulative_curve=delay_cumulative_curve,
         )
     else:
         iterations_time_to_cod = [nominal_time_to_cod] * iterations
@@ -863,6 +914,7 @@ def monte_carlo_irr(
             capex_variation_ml,
             capex_distribution_sharpness,
             iterations,
+            cumulative_curve=capex_variation_cumulative_curve,
         )
     else:
         iterations_capex = [nominal_capex] * iterations
@@ -1037,6 +1089,8 @@ def my_irr_mc_function(
     capex_stress=CAPEX_STRESS,
     delay_stress=DELAY_STRESS,
     eoh_stress=EOH_STRESS,
+    delay_cumulative_curve=None,
+    capex_variation_cumulative_curve=None,
 ):
     iterations_irr, iterations_eoh, iterations_time_to_cod, iterations_capex, iterations_bpb, iterations_npv = (
         monte_carlo_irr(
@@ -1077,6 +1131,8 @@ def my_irr_mc_function(
             irr_tol,
             irr_max_iter,
             wacc,
+            delay_cumulative_curve,
+            capex_variation_cumulative_curve,
         )
     )
     (

@@ -179,6 +179,8 @@ def init_state():
         "energy_price_profile": None,
         "unavailability_profile": None,
         "opex_profile": None,
+        "delay_cumulative_curve": None,
+        "capex_variation_cumulative_curve": None,
         "mean_eoh": list(MEAN_EOH),
         "std_eoh": list(STD_EOH),
     }
@@ -224,6 +226,61 @@ def parse_profile(uploaded, profile_name):
         raise ValueError(f"{profile_name}: no numeric values found")
     return values
 
+
+def parse_cumulative_curve(uploaded, curve_name):
+    if uploaded is None:
+        return None
+    workbook = load_workbook(io.BytesIO(uploaded.getvalue()), data_only=True, read_only=True)
+    try:
+        sheet = workbook[workbook.sheetnames[0]]
+        points = []
+        for row_number, row in enumerate(sheet.iter_rows(values_only=True), 1):
+            cells = [cell for cell in row if cell is not None and str(cell).strip() != ""]
+            if not cells:
+                continue
+            if len(cells) < 2:
+                if not points:
+                    continue
+                raise ValueError(f"{curve_name}: two numeric columns are required at row {row_number}.")
+            try:
+                value = float(str(cells[0]).strip().replace(",", "."))
+                percentile = float(str(cells[1]).strip().replace(",", "."))
+            except (TypeError, ValueError):
+                if not points:
+                    continue
+                raise ValueError(f"{curve_name}: invalid numeric values at row {row_number}.")
+            if not math.isfinite(value) or not math.isfinite(percentile):
+                raise ValueError(f"{curve_name}: non-finite value at row {row_number}.")
+            points.append((value, percentile))
+    finally:
+        workbook.close()
+    if len(points) < 2:
+        raise ValueError(f"{curve_name}: at least two points are required.")
+    values = [point[0] for point in points]
+    percentiles = [point[1] for point in points]
+    scale = 100.0 if max(percentiles) > 1.0 else 1.0
+    probabilities = [percentile / scale for percentile in percentiles]
+    if abs(probabilities[0]) > 1e-9 or abs(probabilities[-1] - 1.0) > 1e-9:
+        raise ValueError(f"{curve_name}: percentiles must start at 0 and end at 100%.")
+    if any(probabilities[index] >= probabilities[index + 1] for index in range(len(probabilities) - 1)):
+        raise ValueError(f"{curve_name}: percentiles must be strictly increasing.")
+    if any(values[index] > values[index + 1] for index in range(len(values) - 1)):
+        raise ValueError(f"{curve_name}: values must be non-decreasing.")
+    return points
+
+def cumulative_curve_workbook(value_label, default_points):
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Cumulative Distribution"
+    sheet.append([value_label, "Percentile (%)"])
+    for value, percentile in default_points:
+        sheet.append([float(value), float(percentile)])
+    sheet.freeze_panes = "A2"
+    sheet.column_dimensions["A"].width = 28
+    sheet.column_dimensions["B"].width = 20
+    output = io.BytesIO()
+    workbook.save(output)
+    return output.getvalue()
 
 def profile_workbook(label, unit, values):
     wb = Workbook()
@@ -329,6 +386,8 @@ def params_workbook(params):
         "energy_price_profile",
         "opex_profile",
         "unavailability_profile",
+        "delay_cumulative_curve",
+        "capex_variation_cumulative_curve",
         "mean_eoh",
         "std_eoh",
         "unavailability_parameters",
@@ -576,6 +635,8 @@ def input_defaults():
         "energy_price_profile": None,
         "unavailability_profile": None,
         "opex_profile": None,
+        "delay_cumulative_curve": None,
+        "capex_variation_cumulative_curve": None,
         "tax_rate": float(TAX_RATE),
         "wacc": float(WACC),
         "capex_depreciation_ratio": float(CAPEX_DEPRECIATION_RATIO),
@@ -1022,8 +1083,19 @@ def input_panel(defaults=None):
             delay_ml = st.number_input("Most Likely Delay (m)", value=float(d("delay_ml", DELAY_ML)))
             delay_max = st.number_input("Maximum Delay (m)", value=int(d("delay_max", DELAY_MAX)), step=1)
             delay_sharpness = st.number_input("Delay Distribution Sharpness", min_value=0.01, value=float(d("delay_distribution_sharpness", DELAY_DISTRIBUTION_SHARPNESS)))
+            delay_file = st.file_uploader("Import Delay Cumulative Curve Excel", type=["xlsx"], key="delay_cdf_upload")
+            if delay_file is not None:
+                st.session_state.delay_cumulative_curve = parse_cumulative_curve(delay_file, "Delay cumulative curve")
+            if st.button("Use Delay Distribution Model"):
+                st.session_state.delay_cumulative_curve = None
+            st.download_button(
+                "Download Delay Curve Template",
+                cumulative_curve_workbook("Delay (m)", [(delay_min, 0), (delay_ml, 50), (delay_max, 100)]),
+                "delay_cumulative_curve.xlsx",
+                key="download_delay_curve_template",
+            )
             if stochastic_delay:
-                values = np.asarray(time_to_cod_generator(int(nominal_time_to_cod), int(delay_min), int(delay_max), delay_ml, delay_sharpness, int(preview_iterations))) - nominal_time_to_cod
+                values = np.asarray(time_to_cod_generator(int(nominal_time_to_cod), int(delay_min), int(delay_max), delay_ml, delay_sharpness, int(preview_iterations), cumulative_curve=st.session_state.delay_cumulative_curve)) - nominal_time_to_cod
                 fig = interactive_histogram(values, 0, "Delay Distribution Preview", "Delay (m)", discrete=True)
                 show_plotly(fig, "delay_preview")
         with c2:
@@ -1032,8 +1104,19 @@ def input_panel(defaults=None):
             capex_ml = st.number_input("Most Likely Variation (%)", value=float(d("capex_variation_ml", CAPEX_VARIATION_ML)))
             capex_max = st.number_input("Maximum Variation (%)", value=float(d("capex_variation_max", CAPEX_VARIATION_MAX)))
             capex_sharpness = st.number_input("CAPEX Distribution Sharpness", min_value=0.01, value=float(d("capex_distribution_sharpness", CAPEX_DISTRIBUTION_SHARPNESS)))
+            capex_curve_file = st.file_uploader("Import CAPEX Variation Cumulative Curve Excel", type=["xlsx"], key="capex_cdf_upload")
+            if capex_curve_file is not None:
+                st.session_state.capex_variation_cumulative_curve = parse_cumulative_curve(capex_curve_file, "CAPEX variation cumulative curve")
+            if st.button("Use CAPEX Distribution Model"):
+                st.session_state.capex_variation_cumulative_curve = None
+            st.download_button(
+                "Download CAPEX Variation Curve Template",
+                cumulative_curve_workbook("CAPEX Variation (%)", [(capex_min, 0), (capex_ml, 50), (capex_max, 100)]),
+                "capex_variation_cumulative_curve.xlsx",
+                key="download_capex_curve_template",
+            )
             if stochastic_capex:
-                values = (np.asarray(capex_generator(nominal_capex, capex_min, capex_max, capex_ml, capex_sharpness, int(preview_iterations))) / nominal_capex - 1) * 100
+                values = (np.asarray(capex_generator(nominal_capex, capex_min, capex_max, capex_ml, capex_sharpness, int(preview_iterations), cumulative_curve=st.session_state.capex_variation_cumulative_curve)) / nominal_capex - 1) * 100
                 fig = interactive_histogram(values, 0, "CAPEX Variation Distribution Preview", "CAPEX Variation (%)", 35)
                 show_plotly(fig, "capex_preview")
         st.divider()
@@ -1092,7 +1175,9 @@ def input_panel(defaults=None):
         "tax_rate": tax_rate, "wacc": wacc, "capex_depreciation_ratio": depreciation_ratio, "capex_depreciation_time": int(depreciation_time),
         "delay_min": int(delay_min), "delay_ml": delay_ml, "delay_max": int(delay_max), "delay_distribution_sharpness": delay_sharpness,
         "capex_variation_min": capex_min, "capex_variation_ml": capex_ml, "capex_variation_max": capex_max,
-        "capex_distribution_sharpness": capex_sharpness, "capex_curve_inflection": inflection, "capex_curve_steepness": steepness,
+        "capex_distribution_sharpness": capex_sharpness, "delay_cumulative_curve": st.session_state.delay_cumulative_curve,
+        "capex_variation_cumulative_curve": st.session_state.capex_variation_cumulative_curve,
+        "capex_curve_inflection": inflection, "capex_curve_steepness": steepness,
         "capex_stress": capex_stress, "delay_stress": delay_stress, "eoh_stress": eoh_stress,
         "irr_guess": irr_guess, "irr_tol": irr_tol, "irr_max_iter": int(irr_max_iter),
     })
