@@ -1618,6 +1618,10 @@ def main():
                 # Do not assign to or recreate the file_uploader widget key.
                 # Streamlit owns complete_inputs_upload and forbids setting it
                 # through st.session_state.
+                # Compute the next revision before clearing session state.
+                # Keeping this value monotonic forces explicitly keyed widgets
+                # (notably Operational Life) to be recreated from Excel values.
+                next_input_revision = st.session_state.get("input_revision", 0) + 1
                 keys_to_clear = [
                     key
                     for key in st.session_state.keys()
@@ -1625,7 +1629,7 @@ def main():
                 ]
                 for key in keys_to_clear:
                     del st.session_state[key]
-                st.session_state.input_revision = st.session_state.get("input_revision", 0) + 1
+                st.session_state.input_revision = next_input_revision
                 st.session_state.imported_inputs = imported_inputs
                 st.session_state.energy_price_profile = (
                     list(imported_profiles["energy_price"])
