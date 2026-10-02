@@ -978,7 +978,7 @@ def input_panel(defaults=None):
         )
         operational_life = st.number_input(
             "Operational Life (y)",
-            min_value=1,
+            min_value=1.0,
             value=float(d("operational_life", OPERATIONAL_LIFE)),
             step=0.1,
             format="%.2f",
