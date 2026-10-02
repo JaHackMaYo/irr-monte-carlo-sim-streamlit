@@ -183,6 +183,8 @@ def init_state():
         "capex_variation_cumulative_curve": None,
         "mean_eoh": list(MEAN_EOH),
         "std_eoh": list(STD_EOH),
+        "import_report": None,
+        "normalized_import_workbook": None,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -556,8 +558,27 @@ def _read_cumulative_curve_sheet(sheet, curve_name):
         raise ValueError(f"{curve_name}: values must be non-decreasing.")
     return use_curve, points
 
+def _align_profile_to_life(values, expected_months, label):
+    """Align an active imported profile to Operational Life and describe the action."""
+    if expected_months <= 0:
+        raise ValueError("Operational Life must be greater than zero.")
+    if not values:
+        raise ValueError(f"{label}: no values were found while the series is enabled.")
+    original_months = len(values)
+    if original_months < expected_months:
+        values = list(values) + [values[-1]] * (expected_months - original_months)
+        action = f"extended from {original_months} to {expected_months} months using the last value"
+    elif original_months > expected_months:
+        values = list(values[:expected_months])
+        action = f"truncated from {original_months} to {expected_months} months"
+    else:
+        values = list(values)
+        action = f"loaded {expected_months} months"
+    return values, action
+
+
 def load_params_workbook(uploaded):
-    """Load and validate the complete workbook exported by this application."""
+    """Load, validate and report the complete workbook exported by this application."""
     workbook = load_workbook(io.BytesIO(uploaded.getvalue()), data_only=True)
     try:
         required_sheets = {
@@ -570,134 +591,135 @@ def load_params_workbook(uploaded):
         if missing:
             raise ValueError(f"Missing worksheet: {', '.join(sorted(missing))}.")
 
+        defaults = input_defaults()
+        scalar_defaults = {
+            key: value
+            for key, value in defaults.items()
+            if key not in {
+                "mean_eoh", "std_eoh", "unavailability_parameters",
+                "energy_price_profile", "opex_profile", "unavailability_profile",
+                "delay_cumulative_curve", "capex_variation_cumulative_curve",
+            }
+        }
+        allowed_keys = set(scalar_defaults) | set(UNAVAILABILITY_INPUT_KEYS)
         inputs_sheet = workbook["Inputs"]
         imported_inputs = {}
+        ignored_inputs = []
         eoh_header_row = None
         for row_number in range(2, inputs_sheet.max_row + 1):
             key = inputs_sheet.cell(row_number, 1).value
             value = inputs_sheet.cell(row_number, 2).value
-            if key == "EOH Month":
+            if str(key).strip() == "EOH Month":
                 eoh_header_row = row_number
                 break
-            if key is None:
+            if key is None or str(key).strip() == "":
                 continue
             key = str(key).strip()
+            if key not in allowed_keys:
+                ignored_inputs.append(key)
+                continue
+            if key in imported_inputs:
+                raise ValueError(f"Duplicate input '{key}' at row {row_number}.")
+            if value is None:
+                raise ValueError(
+                    f"Input '{key}' at row {row_number} is empty. "
+                    "If the cell contains a formula, save the workbook in Excel before importing it."
+                )
             if key in BOOLEAN_INPUT_KEYS:
                 imported_inputs[key] = _parse_boolean(value, key)
             elif key in INTEGER_INPUT_KEYS:
                 imported_inputs[key] = _parse_number(value, key, True)
             elif key in UNAVAILABILITY_INPUT_KEYS:
                 imported_inputs[key] = _parse_number(
-                    value,
-                    key,
-                    integer=(key == "ramp_down_months"),
+                    value, key, integer=(key == "ramp_down_months")
                 )
-            elif isinstance(value, (int, float)) and not isinstance(value, bool):
+            elif isinstance(scalar_defaults.get(key), (int, float)) and not isinstance(
+                scalar_defaults.get(key), bool
+            ):
                 imported_inputs[key] = _parse_number(value, key)
             else:
-                imported_inputs[key] = value
+                imported_inputs[key] = str(value) if key == "project_name" else value
 
+        missing_inputs = sorted(set(scalar_defaults).difference(imported_inputs))
+        if missing_inputs:
+            raise ValueError("Missing input values: " + ", ".join(missing_inputs) + ".")
         if eoh_header_row is None:
             raise ValueError("The Inputs sheet does not contain the EOH table.")
+
         mean_eoh = []
         std_eoh = []
         for offset, expected_month in enumerate(MONTHS, 1):
             row_number = eoh_header_row + offset
             month = inputs_sheet.cell(row_number, 1).value
-            if month != expected_month:
-                raise ValueError(
-                    f"EOH row {row_number}: expected month {expected_month}."
-                )
-            mean_eoh.append(
-                _parse_number(
-                    inputs_sheet.cell(row_number, 2).value,
-                    f"Mean EOH for {expected_month}",
-                )
-            )
-            std_eoh.append(
-                _parse_number(
-                    inputs_sheet.cell(row_number, 3).value,
-                    f"EOH CV for {expected_month}",
-                )
-            )
+            if str(month).strip() != expected_month:
+                raise ValueError(f"EOH row {row_number}: expected month {expected_month}.")
+            mean_eoh.append(_parse_number(inputs_sheet.cell(row_number, 2).value, f"Mean EOH for {expected_month}"))
+            std_eoh.append(_parse_number(inputs_sheet.cell(row_number, 3).value, f"EOH CV for {expected_month}"))
         imported_inputs["mean_eoh"] = mean_eoh
         imported_inputs["std_eoh"] = std_eoh
 
-        missing_unavailability = [
-            key for key in UNAVAILABILITY_INPUT_KEYS if key not in imported_inputs
-        ]
+        missing_unavailability = [key for key in UNAVAILABILITY_INPUT_KEYS if key not in imported_inputs]
         if missing_unavailability:
-            raise ValueError(
-                "Missing unavailability settings: "
-                + ", ".join(missing_unavailability)
-            )
+            raise ValueError("Missing unavailability settings: " + ", ".join(missing_unavailability))
         imported_inputs["unavailability_parameters"] = [
             imported_inputs.pop(key) for key in UNAVAILABILITY_INPUT_KEYS
         ]
+        validate(dict(imported_inputs, energy_price_profile=None, opex_profile=None,
+                      unavailability_profile=None, delay_cumulative_curve=None,
+                      capex_variation_cumulative_curve=None))
 
         profiles_sheet = workbook["Operating Profiles"]
         flags = {
-            "energy_price": _parse_boolean(
-                profiles_sheet.cell(2, 1).value, "Use Energy Price Series"
-            ),
-            "opex": _parse_boolean(
-                profiles_sheet.cell(2, 2).value, "Use OPEX Series"
-            ),
-            "unavailability": _parse_boolean(
-                profiles_sheet.cell(2, 3).value,
-                "Use Unavailability Series",
-            ),
+            "energy_price": _parse_boolean(profiles_sheet.cell(2, 1).value, "Use Energy Price Series"),
+            "opex": _parse_boolean(profiles_sheet.cell(2, 2).value, "Use OPEX Series"),
+            "unavailability": _parse_boolean(profiles_sheet.cell(2, 3).value, "Use Unavailability Series"),
         }
-        profiles = {
-            "energy_price": _read_profile_column(
-                profiles_sheet, 2, "Energy Price series"
-            ),
-            "opex": _read_profile_column(profiles_sheet, 3, "OPEX series"),
-            "unavailability": _read_profile_column(
-                profiles_sheet, 4, "Unavailability series"
-            ),
+        profile_specs = {
+            "energy_price": (2, "Energy Price series"),
+            "opex": (3, "OPEX series"),
+            "unavailability": (4, "Unavailability series"),
         }
-
-        if any(value < 0 for value in profiles["energy_price"]):
-            raise ValueError("Energy Price series cannot contain negative values.")
-        if any(value < 0 for value in profiles["opex"]):
-            raise ValueError("OPEX series cannot contain negative values.")
-        if any(value < 0 or value > 100 for value in profiles["unavailability"]):
-            raise ValueError(
-                "Unavailability series values must be between 0 and 100%."
-            )
-
+        profiles = {}
+        profile_actions = {}
         expected_months = int(imported_inputs["operational_life"]) * 12
-        if expected_months <= 0:
-            raise ValueError("Operational Life must be greater than zero.")
-        # Operational Life may be edited directly in the exported workbook while
-        # the monthly profile sheets still contain the previous number of rows.
-        # Align each profile to the imported life as the model generators do:
-        # truncate longer profiles and extend shorter ones with the last value.
-        for key, values in profiles.items():
-            if not values:
-                raise ValueError(
-                    f"{key.replace('_', ' ').title()} series contains no values."
-                )
-            if len(values) < expected_months:
-                values.extend([values[-1]] * (expected_months - len(values)))
-            elif len(values) > expected_months:
-                profiles[key] = values[:expected_months]
+        for key, (column, label) in profile_specs.items():
+            if not flags[key]:
+                profiles[key] = []
+                profile_actions[key] = "model selected; worksheet values not imported"
+                continue
+            values = _read_profile_column(profiles_sheet, column, label)
+            values, action = _align_profile_to_life(values, expected_months, label)
+            profiles[key] = values
+            profile_actions[key] = action
+
+        if flags["energy_price"] and any(value < 0 for value in profiles["energy_price"]):
+            raise ValueError("Energy Price series cannot contain negative values.")
+        if flags["opex"] and any(value < 0 for value in profiles["opex"]):
+            raise ValueError("OPEX series cannot contain negative values.")
+        if flags["unavailability"] and any(value < 0 or value > 100 for value in profiles["unavailability"]):
+            raise ValueError("Unavailability series values must be between 0 and 100%.")
+
         delay_flag, delay_curve = _read_cumulative_curve_sheet(
             workbook["Delay Distribution"], "Delay cumulative curve"
         )
         capex_curve_flag, capex_curve = _read_cumulative_curve_sheet(
-            workbook["CAPEX Variation Distribution"],
-            "CAPEX variation cumulative curve",
+            workbook["CAPEX Variation Distribution"], "CAPEX variation cumulative curve"
         )
         flags["delay"] = delay_flag
         flags["capex_variation"] = capex_curve_flag
         profiles["delay"] = delay_curve
         profiles["capex_variation"] = capex_curve
-        return imported_inputs, profiles, flags
+        report = {
+            "scalar_inputs": len(scalar_defaults),
+            "operational_life_years": int(imported_inputs["operational_life"]),
+            "expected_operating_months": expected_months,
+            "profile_actions": profile_actions,
+            "active_flags": dict(flags),
+            "ignored_inputs": ignored_inputs,
+        }
+        return imported_inputs, profiles, flags, report
     finally:
         workbook.close()
-
 
 def input_defaults():
     """Return a complete valid parameter set for the downloadable template."""
@@ -1587,7 +1609,7 @@ def main():
             key="load_complete_inputs",
         ):
             try:
-                imported_inputs, imported_profiles, imported_flags = (
+                imported_inputs, imported_profiles, imported_flags, import_report = (
                     load_params_workbook(uploaded_inputs)
                 )
                 # Do not assign to or recreate the file_uploader widget key.
@@ -1628,11 +1650,49 @@ def main():
                 )
                 st.session_state.mean_eoh = list(imported_inputs["mean_eoh"])
                 st.session_state.std_eoh = list(imported_inputs["std_eoh"])
-                st.session_state.status = "Inputs loaded from Excel"
+                effective_import = dict(imported_inputs)
+                effective_import["energy_price_profile"] = st.session_state.energy_price_profile
+                effective_import["opex_profile"] = st.session_state.opex_profile
+                effective_import["unavailability_profile"] = st.session_state.unavailability_profile
+                effective_import["delay_cumulative_curve"] = st.session_state.delay_cumulative_curve
+                effective_import["capex_variation_cumulative_curve"] = st.session_state.capex_variation_cumulative_curve
+                st.session_state.import_report = import_report
+                st.session_state.normalized_import_workbook = params_workbook(effective_import)
+                st.session_state.status = "Inputs loaded and verified from Excel"
                 st.session_state.error = None
                 st.rerun()
             except Exception as exc:
+                st.session_state.error = f"{type(exc).__name__}: {exc}"
+                st.session_state.status = "Excel import error"
                 st.error(f"Unable to load workbook: {exc}")
+
+        if st.session_state.get("import_report"):
+            report = st.session_state.import_report
+            st.success(
+                f"Verified import: {report['scalar_inputs']} scalar inputs; "
+                f"Operational Life {report['operational_life_years']} years; "
+                f"{report['expected_operating_months']} operating months."
+            )
+            verification_rows = [
+                {"Item": key.replace("_", " ").title(), "Result": value}
+                for key, value in report["profile_actions"].items()
+            ]
+            verification_rows.extend(
+                {"Item": key.replace("_", " ").title(), "Result": "active" if value else "model"}
+                for key, value in report["active_flags"].items()
+                if key in {"delay", "capex_variation"}
+            )
+            st.dataframe(pd.DataFrame(verification_rows), hide_index=True, use_container_width=True)
+            if report["ignored_inputs"]:
+                st.warning("Ignored unknown input rows: " + ", ".join(report["ignored_inputs"]))
+            st.download_button(
+                "Download Verified Imported Workbook",
+                st.session_state.normalized_import_workbook,
+                "irr_inputs_verified.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                key="download_verified_import",
+            )
 
         st.divider()
         try:
