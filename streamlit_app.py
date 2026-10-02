@@ -668,12 +668,21 @@ def load_params_workbook(uploaded):
             )
 
         expected_months = int(imported_inputs["operational_life"]) * 12
+        if expected_months <= 0:
+            raise ValueError("Operational Life must be greater than zero.")
+        # Operational Life may be edited directly in the exported workbook while
+        # the monthly profile sheets still contain the previous number of rows.
+        # Align each profile to the imported life as the model generators do:
+        # truncate longer profiles and extend shorter ones with the last value.
         for key, values in profiles.items():
-            if len(values) != expected_months:
+            if not values:
                 raise ValueError(
-                    f"{key.replace('_', ' ').title()} series contains "
-                    f"{len(values)} values; {expected_months} are required."
+                    f"{key.replace('_', ' ').title()} series contains no values."
                 )
+            if len(values) < expected_months:
+                values.extend([values[-1]] * (expected_months - len(values)))
+            elif len(values) > expected_months:
+                profiles[key] = values[:expected_months]
         delay_flag, delay_curve = _read_cumulative_curve_sheet(
             workbook["Delay Distribution"], "Delay cumulative curve"
         )
