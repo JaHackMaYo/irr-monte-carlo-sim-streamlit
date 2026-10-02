@@ -931,58 +931,61 @@ def input_panel(defaults=None):
 
     def d(name, fallback):
         return defaults.get(name, fallback)
+    revision = st.session_state.get("input_revision", 0)
+    def k(name):
+        return f"{name}_{revision}"
 
     st.subheader("Inputs")
     general, operation, uncertainty, advanced = st.tabs(["General", "Operating models", "CAPEX, Time to COD and EOH", "Advanced"])
     with general:
-        project_name = st.text_input("Project Name", d("project_name", PROJECT_NAME))
+        project_name = st.text_input("Project Name", d("project_name", PROJECT_NAME), key=k("project_name"))
         capacity = st.number_input(
             "Capacity (MW)", min_value=0.0, value=float(d("capacity", CAPACITY))
-        )
+        , key=k("capacity_mw"))
         iterations = st.number_input(
             "Iterations", min_value=1, value=int(d("iterations", ITERATIONS)), step=100
-        )
+        , key=k("iterations"))
 
         st.divider()
         stochastic_capex = st.toggle(
             "Simulate Stochastic CAPEX", bool(d("stochastic_capex", STOCHASTIC_CAPEX))
-        )
+        , key=k("simulate_stochastic_capex"))
         stochastic_delay = st.toggle(
             "Simulate Stochastic Delay", bool(d("stochastic_delay", STOCHASTIC_DELAY))
-        )
+        , key=k("simulate_stochastic_delay"))
         stochastic_eoh = st.toggle(
             "Simulate Stochastic EOH", bool(d("stochastic_eoh", STOCHASTIC_EOH))
-        )
+        , key=k("simulate_stochastic_eoh"))
 
         st.divider()
         nominal_capex = st.number_input(
             "Nominal CAPEX (M€)", min_value=0.0, value=float(d("nominal_capex", NOMINAL_CAPEX))
-        )
+        , key=k("nominal_capex_m"))
 
         st.divider()
         start_year = st.number_input(
             "Start Year", min_value=1, value=int(d("start_year", START_YEAR)), step=1
-        )
+        , key=k("start_year"))
         start_month = st.number_input(
             "Start Month (1 = Jan)",
             min_value=1,
             max_value=12,
             value=int(d("start_month", START_MONTH)),
             step=1,
-        )
+         key=k("start_month_1_jan"))
         nominal_time_to_cod = st.number_input(
             "Nominal Time to COD (m)",
             min_value=1,
             value=int(d("nominal_time_to_cod", NOMINAL_TIME_TO_COD)),
             step=1,
-        )
+         key=k("nominal_time_to_cod_m"))
         operational_life = st.number_input(
             "Operational Life (y)",
             min_value=1.0,
             value=float(d("operational_life", OPERATIONAL_LIFE)),
             step=0.1,
             format="%.2f",
-            key=f"operational_life_{st.session_state.get('input_revision', 0)}",
+            key=k("operational_life_y"),
         )
 
         st.divider()
@@ -991,39 +994,39 @@ def input_panel(defaults=None):
             min_value=0.0,
             value=float(d("tax_rate", TAX_RATE)),
             format="%.4f",
-        )
+         key=k("tax_rate_1_100"))
         wacc = st.number_input(
             "Annual WACC (1 = 100%)",
             min_value=0.0,
             value=float(d("wacc", WACC)),
             format="%.4f",
             help="Effective annual discount rate used to calculate NPV from monthly cash flows.",
-        )
+         key=k("annual_wacc_1_100"))
         depreciation_ratio = st.number_input(
             "Depreciable CAPEX Ratio",
             min_value=0.0,
             max_value=1.0,
             value=float(d("capex_depreciation_ratio", CAPEX_DEPRECIATION_RATIO)),
             format="%.4f",
-        )
+         key=k("depreciable_capex_ratio"))
         depreciation_time = st.number_input(
             "Depreciation Period (y)",
             min_value=1,
             value=int(d("capex_depreciation_time", CAPEX_DEPRECIATION_TIME)),
             step=1,
-        )
+         key=k("depreciation_period_y"))
 
         st.divider()
         st.markdown("#### Stress")
         capex_stress = st.number_input(
             "CAPEX Stress (%)", value=float(d("capex_stress", CAPEX_STRESS))
-        )
+        , key=k("capex_stress"))
         delay_stress = st.number_input(
             "Delay Stress (m)", value=float(d("delay_stress", DELAY_STRESS))
-        )
+        , key=k("delay_stress_m"))
         eoh_stress = st.number_input(
             "EOH Stress (%)", value=float(d("eoh_stress", EOH_STRESS))
-        )
+        , key=k("eoh_stress"))
 
         st.divider()
         with st.expander("CAPEX S-Curve preview", expanded=False):
@@ -1034,12 +1037,12 @@ def input_panel(defaults=None):
                 1.0,
                 float(d("capex_curve_inflection", CAPEX_CURVE_INFLECTION)),
                 0.05,
-            )
+             key=k("inflection_point"))
             steepness = b.number_input(
                 "Steepness",
                 min_value=0.01,
                 value=float(d("capex_curve_steepness", CAPEX_CURVE_STEEPNESS)),
-            )
+             key=k("steepness"))
             monthly = np.asarray(
                 distribute_capex(
                     nominal_capex,
@@ -1061,11 +1064,11 @@ def input_panel(defaults=None):
             "Energy Price at COD (EUR/MWh)",
             min_value=0.0,
             value=float(d("energy_price_at_cod", ENERGY_PRICE_AT_COD)),
-        )
+         key=k("energy_price_at_cod_eur_mwh"))
         annual_price = st.number_input(
             "Annual Price Variation (EUR/MWh/y)",
             value=float(d("annual_price_variation", ANNUAL_PRICE_VARIATION)),
-        )
+         key=k("annual_price_variation_eur_mwh_y"))
         file_e = st.file_uploader(
             "Import Energy Price Excel", type=["xlsx"], key="e_upload"
         )
@@ -1097,7 +1100,7 @@ def input_panel(defaults=None):
             min_value=0.0,
             value=float(d("opex", OPEX)),
             format="%.5f",
-        )
+         key=k("opex_m_mw_y"))
         file_o = st.file_uploader("Import OPEX Excel", type=["xlsx"], key="o_upload")
         if file_o is not None:
             st.session_state.opex_profile = parse_profile(file_o, "OPEX")
@@ -1128,24 +1131,24 @@ def input_panel(defaults=None):
             "Initial Unavailability (%)",
             min_value=0.0,
             value=float(d("unavailability_parameters", UNAVAILABILITY_PARAMETERS)[0]),
-        )
+         key=k("initial_unavailability"))
         us = st.number_input(
             "Steady-state Unavailability (%)",
             min_value=0.0,
             value=float(d("unavailability_parameters", UNAVAILABILITY_PARAMETERS)[1]),
-        )
+         key=k("steady_state_unavailability"))
         ur = st.number_input(
             "Ramp-down (m)",
             min_value=1,
             value=int(d("unavailability_parameters", UNAVAILABILITY_PARAMETERS)[2]),
             step=1,
-        )
+         key=k("ramp_down_m"))
         ua = st.number_input(
             "Ageing Degradation (%/m)",
             min_value=0.0,
             value=float(d("unavailability_parameters", UNAVAILABILITY_PARAMETERS)[3]),
             format="%.4f",
-        )
+         key=k("ageing_degradation_m"))
         file_u = st.file_uploader(
             "Import Unavailability Excel", type=["xlsx"], key="u_upload"
         )
@@ -1180,23 +1183,23 @@ def input_panel(defaults=None):
             max_value=1.0,
             value=float(d("capex_delay_correlation", CAPEX_DELAY_CORRELATION)),
             step=0.05,
-        )
+         key=k("capex_delay_correlation"))
         preview_iterations = st.number_input(
             "Preview Distribution Iterations",
             min_value=100,
             value=3000,
             step=100,
-            key="preview_distribution_iterations",
+            key=k("preview_distribution_iterations"),
         )
         st.divider()
         st.divider()
         c1, c2 = st.columns(2)
         with c1:
             st.markdown("#### Delay")
-            delay_min = st.number_input("Minimum Delay (m)", value=int(d("delay_min", DELAY_MIN)), step=1)
-            delay_ml = st.number_input("Most Likely Delay (m)", value=float(d("delay_ml", DELAY_ML)))
-            delay_max = st.number_input("Maximum Delay (m)", value=int(d("delay_max", DELAY_MAX)), step=1)
-            delay_sharpness = st.number_input("Delay Distribution Sharpness", min_value=0.01, value=float(d("delay_distribution_sharpness", DELAY_DISTRIBUTION_SHARPNESS)))
+            delay_min = st.number_input("Minimum Delay (m)", value=int(d("delay_min", DELAY_MIN)), step=1, key=k("minimum_delay_m"))
+            delay_ml = st.number_input("Most Likely Delay (m)", value=float(d("delay_ml", DELAY_ML)), key=k("most_likely_delay_m"))
+            delay_max = st.number_input("Maximum Delay (m)", value=int(d("delay_max", DELAY_MAX)), step=1, key=k("maximum_delay_m"))
+            delay_sharpness = st.number_input("Delay Distribution Sharpness", min_value=0.01, value=float(d("delay_distribution_sharpness", DELAY_DISTRIBUTION_SHARPNESS)), key=k("delay_distribution_sharpness"))
             delay_file = st.file_uploader("Import Delay Cumulative Curve Excel", type=["xlsx"], key="delay_cdf_upload")
             if delay_file is not None:
                 st.session_state.delay_cumulative_curve = parse_cumulative_curve(delay_file, "Delay cumulative curve")
@@ -1214,10 +1217,10 @@ def input_panel(defaults=None):
                 show_plotly(fig, "delay_preview")
         with c2:
             st.markdown("#### CAPEX variation")
-            capex_min = st.number_input("Minimum Variation (%)", value=float(d("capex_variation_min", CAPEX_VARIATION_MIN)))
-            capex_ml = st.number_input("Most Likely Variation (%)", value=float(d("capex_variation_ml", CAPEX_VARIATION_ML)))
-            capex_max = st.number_input("Maximum Variation (%)", value=float(d("capex_variation_max", CAPEX_VARIATION_MAX)))
-            capex_sharpness = st.number_input("CAPEX Distribution Sharpness", min_value=0.01, value=float(d("capex_distribution_sharpness", CAPEX_DISTRIBUTION_SHARPNESS)))
+            capex_min = st.number_input("Minimum Variation (%)", value=float(d("capex_variation_min", CAPEX_VARIATION_MIN)), key=k("minimum_variation"))
+            capex_ml = st.number_input("Most Likely Variation (%)", value=float(d("capex_variation_ml", CAPEX_VARIATION_ML)), key=k("most_likely_variation"))
+            capex_max = st.number_input("Maximum Variation (%)", value=float(d("capex_variation_max", CAPEX_VARIATION_MAX)), key=k("maximum_variation"))
+            capex_sharpness = st.number_input("CAPEX Distribution Sharpness", min_value=0.01, value=float(d("capex_distribution_sharpness", CAPEX_DISTRIBUTION_SHARPNESS)), key=k("capex_distribution_sharpness"))
             capex_curve_file = st.file_uploader("Import CAPEX Variation Cumulative Curve Excel", type=["xlsx"], key="capex_cdf_upload")
             if capex_curve_file is not None:
                 st.session_state.capex_variation_cumulative_curve = parse_cumulative_curve(capex_curve_file, "CAPEX variation cumulative curve")
@@ -1247,7 +1250,7 @@ def input_panel(defaults=None):
             hide_index=True,
             use_container_width=True,
             disabled=["Month"],
-            key="eoh_editor",
+            key=k("eoh_editor"),
         )
         st.session_state.mean_eoh = edited["Mean EOH"].astype(float).tolist()
         st.session_state.std_eoh = edited["CV"].astype(float).tolist()
@@ -1256,7 +1259,7 @@ def input_panel(defaults=None):
             min_value=0.0,
             value=float(d("mean_eoh_variation", MEAN_EOH_VARIATION)),
             format="%.4f",
-        )
+         key=k("mean_eoh_factor"))
         means = np.asarray(st.session_state.mean_eoh)
         cvs = np.asarray(st.session_state.std_eoh)
         sigma = means * cvs
@@ -1273,9 +1276,9 @@ def input_panel(defaults=None):
 
     with advanced:
         c1, c2, c3 = st.columns(3)
-        irr_guess = c1.number_input("IRR Initial Guess", value=float(d("irr_guess", IRR_GUESS)), format="%.6f")
-        irr_tol = c2.number_input("IRR Tolerance", value=float(d("irr_tol", IRR_TOL)), format="%.12f")
-        irr_max_iter = c3.number_input("Maximum IRR Iterations", min_value=1, value=int(d("irr_max_iter", IRR_MAX_ITER)), step=1)
+        irr_guess = c1.number_input("IRR Initial Guess", value=float(d("irr_guess", IRR_GUESS)), format="%.6f", key=k("irr_initial_guess"))
+        irr_tol = c2.number_input("IRR Tolerance", value=float(d("irr_tol", IRR_TOL)), format="%.12f", key=k("irr_tolerance"))
+        irr_max_iter = c3.number_input("Maximum IRR Iterations", min_value=1, value=int(d("irr_max_iter", IRR_MAX_ITER)), step=1, key=k("maximum_irr_iterations"))
 
     return validate({
         "project_name": project_name, "iterations": int(iterations), "capex_delay_correlation": correlation,
