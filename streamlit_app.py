@@ -19,6 +19,7 @@ from core import (
     generate_flows,
     my_irr_mc_function,
     opex_generator,
+    operational_life_months,
     time_to_cod_generator,
     unavailability_generator,
 )
@@ -185,6 +186,7 @@ def init_state():
         "std_eoh": list(STD_EOH),
         "import_report": None,
         "normalized_import_workbook": None,
+        "input_revision": 0,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -309,7 +311,6 @@ INTEGER_INPUT_KEYS = {
     "start_year",
     "start_month",
     "nominal_time_to_cod",
-    "operational_life",
     "capex_depreciation_time",
     "delay_min",
     "delay_max",
@@ -424,7 +425,7 @@ def params_workbook(params):
         "opex": params.get("opex_profile") is not None,
         "unavailability": params.get("unavailability_profile") is not None,
     }
-    life = int(params["operational_life"])
+    life = float(params["operational_life"])
     energy_price_values = energy_price_generator(
         0,
         life,
@@ -473,7 +474,7 @@ def params_workbook(params):
             "Unavailability (%)",
         ]
     )
-    expected_months = life * 12
+    expected_months = operational_life_months(life)
     for index in range(expected_months):
         profiles_sheet.append(
             [
@@ -681,7 +682,7 @@ def load_params_workbook(uploaded):
         }
         profiles = {}
         profile_actions = {}
-        expected_months = int(imported_inputs["operational_life"]) * 12
+        expected_months = operational_life_months(imported_inputs["operational_life"])
         for key, (column, label) in profile_specs.items():
             if not flags[key]:
                 profiles[key] = []
@@ -711,7 +712,7 @@ def load_params_workbook(uploaded):
         profiles["capex_variation"] = capex_curve
         report = {
             "scalar_inputs": len(scalar_defaults),
-            "operational_life_years": int(imported_inputs["operational_life"]),
+            "operational_life_years": float(imported_inputs["operational_life"]),
             "expected_operating_months": expected_months,
             "profile_actions": profile_actions,
             "active_flags": dict(flags),
@@ -734,7 +735,7 @@ def input_defaults():
         "start_year": int(START_YEAR),
         "start_month": int(START_MONTH),
         "nominal_time_to_cod": int(NOMINAL_TIME_TO_COD),
-        "operational_life": int(OPERATIONAL_LIFE),
+        "operational_life": float(OPERATIONAL_LIFE),
         "capacity": float(CAPACITY),
         "mean_eoh": list(MEAN_EOH),
         "std_eoh": list(STD_EOH),
@@ -807,7 +808,7 @@ def single_iteration_workbook(generated, params):
         raise ValueError("Single-iteration series have different lengths.")
 
     total_months = lengths.pop()
-    operational_life = int(params["operational_life"])
+    operational_life = float(params["operational_life"])
     actual_time_to_cod = total_months - operational_life * 12
     if actual_time_to_cod < 0:
         raise ValueError("Unable to derive a valid actual Time to COD.")
@@ -978,8 +979,10 @@ def input_panel(defaults=None):
         operational_life = st.number_input(
             "Operational Life (y)",
             min_value=1,
-            value=int(d("operational_life", OPERATIONAL_LIFE)),
-            step=1,
+            value=float(d("operational_life", OPERATIONAL_LIFE)),
+            step=0.1,
+            format="%.2f",
+            key=f"operational_life_{st.session_state.get('input_revision', 0)}",
         )
 
         st.divider()
@@ -1072,7 +1075,7 @@ def input_panel(defaults=None):
             st.session_state.energy_price_profile = None
         e_values = energy_price_generator(
             0,
-            int(operational_life),
+            operational_life,
             energy_price,
             annual_price,
             series=st.session_state.energy_price_profile,
@@ -1102,7 +1105,7 @@ def input_panel(defaults=None):
             st.session_state.opex_profile = None
         o_values = opex_generator(
             0,
-            int(operational_life),
+            operational_life,
             opex,
             capacity,
             series=st.session_state.opex_profile,
@@ -1154,7 +1157,7 @@ def input_panel(defaults=None):
             st.session_state.unavailability_profile = None
         u_values = unavailability_generator(
             0,
-            int(operational_life),
+            operational_life,
             u0,
             us,
             ur,
@@ -1278,7 +1281,7 @@ def input_panel(defaults=None):
         "project_name": project_name, "iterations": int(iterations), "capex_delay_correlation": correlation,
         "stochastic_capex": stochastic_capex, "stochastic_delay": stochastic_delay, "stochastic_eoh": stochastic_eoh,
         "nominal_capex": nominal_capex, "start_year": int(start_year), "start_month": int(start_month),
-        "nominal_time_to_cod": int(nominal_time_to_cod), "operational_life": int(operational_life), "capacity": capacity,
+        "nominal_time_to_cod": int(nominal_time_to_cod), "operational_life": float(operational_life), "capacity": capacity,
         "mean_eoh": st.session_state.mean_eoh, "std_eoh": st.session_state.std_eoh, "mean_eoh_variation": mean_eoh_variation,
         "unavailability_parameters": [u0, us, int(ur), ua], "opex": opex, "energy_price_at_cod": energy_price,
         "annual_price_variation": annual_price, "energy_price_profile": st.session_state.energy_price_profile,
@@ -1355,7 +1358,7 @@ def single_iteration_view(generated, params):
     irr, actual_eoh, pbp, npv, capex, eoh, unavailability, price, revenues, taxes, opex = generated
     arrays = [np.asarray(v,float) for v in (capex,eoh,unavailability,price,revenues,taxes,opex)]
     capex,eoh,unavailability,price,revenues,taxes,opex = arrays
-    total=len(capex); cod=total-int(params["operational_life"])*12; months=np.arange(1,total+1); net=-capex+revenues-opex-taxes; cumulative=np.cumsum(net)
+    total=len(capex); cod=total-operational_life_months(params["operational_life"]); months=np.arange(1,total+1); net=-capex+revenues-opex-taxes; cumulative=np.cumsum(net)
     c=st.columns(6); c[0].metric("IRR",f"{irr:.2%}"); c[1].metric("NPV",f"{npv:.2f} M€"); c[2].metric("PBP",f"{pbp:.2f} y"); c[3].metric("Actual CAPEX",f"{capex.sum():.2f} M€"); c[4].metric("Actual Time to COD",f"{cod} m"); c[5].metric("Total EOH",f"{actual_eoh:,.0f} h")
     st.download_button(
         "Download Single Iteration Excel",
@@ -1622,6 +1625,7 @@ def main():
                 ]
                 for key in keys_to_clear:
                     del st.session_state[key]
+                st.session_state.input_revision = st.session_state.get("input_revision", 0) + 1
                 st.session_state.imported_inputs = imported_inputs
                 st.session_state.energy_price_profile = (
                     list(imported_profiles["energy_price"])
@@ -1670,30 +1674,9 @@ def main():
             report = st.session_state.import_report
             st.success(
                 f"Verified import: {report['scalar_inputs']} scalar inputs; "
-                f"Operational Life {report['operational_life_years']} years; "
+                f"Operational Life {report['operational_life_years']:g} years; "
                 f"{report['expected_operating_months']} operating months."
             )
-            verification_rows = [
-                {"Item": key.replace("_", " ").title(), "Result": value}
-                for key, value in report["profile_actions"].items()
-            ]
-            verification_rows.extend(
-                {"Item": key.replace("_", " ").title(), "Result": "active" if value else "model"}
-                for key, value in report["active_flags"].items()
-                if key in {"delay", "capex_variation"}
-            )
-            st.dataframe(pd.DataFrame(verification_rows), hide_index=True, use_container_width=True)
-            if report["ignored_inputs"]:
-                st.warning("Ignored unknown input rows: " + ", ".join(report["ignored_inputs"]))
-            st.download_button(
-                "Download Verified Imported Workbook",
-                st.session_state.normalized_import_workbook,
-                "irr_inputs_verified.xlsx",
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
-                key="download_verified_import",
-            )
-
         st.divider()
         try:
             params = input_panel(st.session_state.get("imported_inputs"))

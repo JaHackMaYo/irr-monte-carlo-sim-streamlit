@@ -6,6 +6,14 @@ from config import *
 
 from utils import correlate_data, get_percentile
 
+
+def operational_life_months(operational_life):
+    """Convert an operating life expressed in years to the nearest whole month."""
+    years = float(operational_life)
+    if not math.isfinite(years) or years <= 0:
+        raise ValueError("Operational life must be a finite value greater than zero.")
+    return max(1, int(math.floor(years * 12.0 + 0.5)))
+
 def inverse_transform_sample(cumulative_curve, size=1):
     """Sample values from a user-supplied cumulative distribution.
 
@@ -275,7 +283,7 @@ def eoh_generator(
     perform sensitivity analyses on average utilization levels.
     """
     output = [0.0] * actual_time_to_cod
-    for i in range(operational_life * 12):
+    for i in range(operational_life_months(operational_life)):
         month = (start_month - 1 + actual_time_to_cod + i) % 12
         mean = mean_eoh[month] * mean_eoh_variation
         if stochastic_eoh:
@@ -302,7 +310,7 @@ def _complete_operating_series(values, actual_time_to_cod, operational_life, pro
     if any(not math.isfinite(value) for value in operating):
         raise ValueError(f"{profile_name}: all values must be finite.")
 
-    required_months = int(operational_life) * 12
+    required_months = operational_life_months(operational_life)
     if required_months <= 0:
         raise ValueError("Operational life must be greater than zero.")
     if len(operating) < required_months:
@@ -333,7 +341,7 @@ def energy_price_generator(
         return external
 
     output = [0.0] * int(actual_time_to_cod)
-    for i in range(int(operational_life) * 12):
+    for i in range(operational_life_months(operational_life)):
         years_from_cod = i / 12
         output.append(energy_price_at_cod + annual_price_variation * years_from_cod)
     return output
@@ -359,7 +367,7 @@ def opex_generator(
         return external
 
     monthly_opex = opex * capacity / 12
-    return [0.0] * int(actual_time_to_cod) + [monthly_opex] * (int(operational_life) * 12)
+    return [0.0] * int(actual_time_to_cod) + [monthly_opex] * operational_life_months(operational_life)
 
 def unavailability_generator(
     actual_time_to_cod=18,
@@ -389,7 +397,7 @@ def unavailability_generator(
             raise ValueError("Unavailability series values must be between 0 and 100%.")
         return external
 
-    operation_months = int(operational_life) * 12
+    operation_months = operational_life_months(operational_life)
     output = [0.0] * int(actual_time_to_cod)
     for i in range(operation_months):
         if i < ramp_down_months:
@@ -645,7 +653,7 @@ def calculate_project_flows(
         actual_time_to_cod,
         capex_curve_inflection,
         capex_curve_steepness,
-    ) + [0.0] * (operational_life * 12)
+    ) + [0.0] * operational_life_months(operational_life)
     eoh = eoh_generator(
         start_month,
         actual_time_to_cod,

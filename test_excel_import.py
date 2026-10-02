@@ -36,13 +36,14 @@ def edited_workbook(life, active_profiles=True, numeric_as_text=False):
 
 
 def run_checks():
-    for life in (20, 35):
+    for life in (20, 35, 44.04, 44.08):
         inputs, profiles, flags, report = app.load_params_workbook(
             edited_workbook(life, active_profiles=True)
         )
-        assert inputs["operational_life"] == life
-        assert report["expected_operating_months"] == life * 12
-        assert all(len(profiles[key]) == life * 12 for key in ("energy_price", "opex", "unavailability"))
+        expected_months = app.operational_life_months(life)
+        assert inputs["operational_life"] == float(life)
+        assert report["expected_operating_months"] == expected_months
+        assert all(len(profiles[key]) == expected_months for key in ("energy_price", "opex", "unavailability"))
 
     inputs, profiles, flags, report = app.load_params_workbook(
         edited_workbook(25, active_profiles=False)
@@ -51,9 +52,9 @@ def run_checks():
     assert all(profiles[key] == [] for key in ("energy_price", "opex", "unavailability"))
 
     inputs, profiles, flags, report = app.load_params_workbook(
-        edited_workbook(22, active_profiles=True, numeric_as_text=True)
+        edited_workbook(22.25, active_profiles=True, numeric_as_text=True)
     )
-    assert inputs["operational_life"] == 22
+    assert inputs["operational_life"] == 22.25
     assert inputs["nominal_capex"] == 75.5
 
     verified = dict(inputs)
@@ -64,8 +65,21 @@ def run_checks():
     verified["capex_variation_cumulative_curve"] = profiles["capex_variation"] if flags["capex_variation"] else None
     round_trip = app.params_workbook(verified)
     reloaded = app.load_params_workbook(Upload(round_trip))[0]
-    assert reloaded["operational_life"] == 22
+    assert reloaded["operational_life"] == 22.25
     assert reloaded["nominal_capex"] == 75.5
+
+    assert app.operational_life_months(44.0) == 528
+    assert app.operational_life_months(44.04) == 528
+    assert app.operational_life_months(44.08) == 529
+    generated = app.generate_flows(
+        stochastic_capex=False,
+        stochastic_delay=False,
+        nominal_time_to_cod=24,
+        operational_life=44.08,
+        stochastic_eoh=False,
+    )
+    assert len(generated[4]) == 24 + 529
+    assert all(len(series) == 24 + 529 for series in generated[4:])
     print("All Excel import regression checks passed.")
 
 

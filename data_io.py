@@ -1,16 +1,12 @@
 import math
 from datetime import date
-
 from openpyxl import Workbook, load_workbook
 from openpyxl.utils import get_column_letter
+from core import operational_life_months
+
 
 def load_monthly_profile_from_excel(path, profile_name):
-    """Load an operating-month profile from the first worksheet of an Excel file.
-
-    Accepted layouts are either one numeric column, or a first column containing
-    dates/month indexes and a second numeric column. A header row is optional.
-    Values are returned in worksheet order and are applied from COD onward.
-    """
+    """Load an operating-month profile from the first worksheet of an Excel file."""
     workbook = load_workbook(path, data_only=True, read_only=True)
     try:
         sheet = workbook[workbook.sheetnames[0]]
@@ -36,7 +32,7 @@ def load_monthly_profile_from_excel(path, profile_name):
                 continue
         if numeric is None:
             if not values:
-                continue  # optional header row
+                continue
             raise ValueError(f"{profile_name}: no numeric value found at row {row_number}.")
         if not math.isfinite(numeric):
             raise ValueError(f"{profile_name}: non-finite value at row {row_number}.")
@@ -45,20 +41,12 @@ def load_monthly_profile_from_excel(path, profile_name):
         raise ValueError(f"{profile_name}: no numeric monthly values were found.")
     return values
 
+
 def export_generated_flows_to_excel(input_parameters, generated_flows, path, input_rows):
     """Export GUI inputs and one generated iteration to a simple workbook."""
     (
-        irr,
-        actual_eoh,
-        pbp,
-        npv,
-        capex_flows,
-        eoh,
-        unavailabilities,
-        energy_prices,
-        revenues_flows,
-        taxes_flows,
-        opexes,
+        irr, actual_eoh, pbp, npv, capex_flows, eoh, unavailabilities,
+        energy_prices, revenues_flows, taxes_flows, opexes,
     ) = generated_flows
     series = {
         "CAPEX (MEUR)": list(capex_flows),
@@ -73,8 +61,8 @@ def export_generated_flows_to_excel(input_parameters, generated_flows, path, inp
     if len(lengths) != 1:
         raise ValueError("Generated monthly flow series have different lengths.")
     total_months = lengths.pop()
-    operational_life = int(input_parameters["operational_life"])
-    actual_time_to_cod = total_months - operational_life * 12
+    operation_months = operational_life_months(input_parameters["operational_life"])
+    actual_time_to_cod = total_months - operation_months
     if actual_time_to_cod < 0:
         raise ValueError("Unable to derive a valid Time to COD from generated flows.")
     net_cash_flows = []
@@ -108,33 +96,22 @@ def export_generated_flows_to_excel(input_parameters, generated_flows, path, inp
     start_month = int(input_parameters.get("start_month", 1))
     if not 1 <= start_month <= 12:
         raise ValueError("Start Month must be between 1 and 12.")
-    flow_dates = [
-        date(
-            start_year + (start_month - 1 + month) // 12,
-            (start_month - 1 + month) % 12 + 1,
-            15,
-        )
-        for month in range(total_months)
-    ]
+    flow_dates = [date(start_year + (start_month - 1 + month) // 12,
+                       (start_month - 1 + month) % 12 + 1, 15)
+                  for month in range(total_months)]
     headers = ["Month", "Date", "Phase", "Operating Month"] + list(series)
     flows_sheet.append(headers)
     for month in range(total_months):
         construction = month < actual_time_to_cod
-        row = [
-            month + 1,
-            flow_dates[month],
-            "Construction" if construction else "Operation",
-            0 if construction else month - actual_time_to_cod + 1,
-        ]
+        row = [month + 1, flow_dates[month], "Construction" if construction else "Operation",
+               0 if construction else month - actual_time_to_cod + 1]
         row.extend(float(values[month]) for values in series.values())
         flows_sheet.append(row)
     flows_sheet.freeze_panes = "A2"
     flows_sheet.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{flows_sheet.max_row}"
     for column in range(1, len(headers) + 1):
         header = headers[column - 1]
-        flows_sheet.column_dimensions[get_column_letter(column)].width = max(
-            12, min(28, len(header) + 3)
-        )
+        flows_sheet.column_dimensions[get_column_letter(column)].width = max(12, min(28, len(header) + 3))
     money_format = "#,##0.000;[Red](#,##0.000);-"
     number_format = "#,##0.00;[Red](#,##0.00);-"
     for row in range(2, flows_sheet.max_row + 1):
