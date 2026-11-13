@@ -67,6 +67,8 @@ def run_checks():
     reloaded = app.load_params_workbook(Upload(round_trip))[0]
     assert reloaded["operational_life"] == 22.25
     assert reloaded["nominal_capex"] == 75.5
+    assert reloaded["systematic_eoh_error"] is False
+    assert reloaded["systematic_eoh_error_std"] == 5.0
 
     assert app.operational_life_months(44.0) == 528
     assert app.operational_life_months(44.04) == 528
@@ -80,6 +82,14 @@ def run_checks():
     )
     assert len(generated[4]) == 24 + 529
     assert all(len(series) == 24 + 529 for series in generated[4:])
+    params = app.input_defaults()
+    params["iterations"] = 5
+    params["systematic_eoh_error"] = True
+    params["systematic_eoh_error_std"] = 5.0
+    with_error = app.run_monte_carlo(params)
+    without_error = app.run_monte_carlo(dict(params, systematic_eoh_error=False))
+    assert with_error.reference_eoh == without_error.reference_eoh
+    assert with_error.reference_irr == without_error.reference_irr
     print("All Excel import regression checks passed.")
 
 

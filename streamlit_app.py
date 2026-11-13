@@ -305,6 +305,7 @@ BOOLEAN_INPUT_KEYS = {
     "stochastic_capex",
     "stochastic_delay",
     "stochastic_eoh",
+    "systematic_eoh_error",
 }
 INTEGER_INPUT_KEYS = {
     "iterations",
@@ -731,6 +732,8 @@ def input_defaults():
         "stochastic_capex": bool(STOCHASTIC_CAPEX),
         "stochastic_delay": bool(STOCHASTIC_DELAY),
         "stochastic_eoh": bool(STOCHASTIC_EOH),
+        "systematic_eoh_error": bool(SYSTEMATIC_EOH_ERROR),
+        "systematic_eoh_error_std": float(SYSTEMATIC_EOH_ERROR_STD),
         "nominal_capex": float(NOMINAL_CAPEX),
         "start_year": int(START_YEAR),
         "start_month": int(START_MONTH),
@@ -921,6 +924,8 @@ def validate(params):
         raise ValueError("Annual WACC must be greater than -100%")
     if any(v < 0 for v in params["std_eoh"]):
         raise ValueError("EOH coefficients of variation cannot be negative")
+    if params["systematic_eoh_error_std"] < 0:
+        raise ValueError("Systematic EOH error standard deviation cannot be negative")
     if any(v < 0 for v in params["unavailability_parameters"]):
         raise ValueError("Unavailability parameters cannot be negative")
     return params
@@ -956,6 +961,17 @@ def input_panel(defaults=None):
         stochastic_eoh = st.toggle(
             "Simulate Stochastic EOH", bool(d("stochastic_eoh", STOCHASTIC_EOH))
         , key=k("simulate_stochastic_eoh"))
+        systematic_eoh_error = st.toggle(
+            "Apply Systematic EOH Error", bool(d("systematic_eoh_error", SYSTEMATIC_EOH_ERROR)),
+            help="One Gaussian percentage error is drawn per iteration and applied to all monthly EOH means before monthly values are generated. Reference values always use zero error.",
+            key=k("apply_systematic_eoh_error"),
+        )
+        systematic_eoh_error_std = st.number_input(
+            "Systematic EOH Error Std. Dev. (%)", min_value=0.0,
+            value=float(d("systematic_eoh_error_std", SYSTEMATIC_EOH_ERROR_STD)),
+            format="%.3f", disabled=not systematic_eoh_error,
+            key=k("systematic_eoh_error_std_pct"),
+        )
 
         st.divider()
         nominal_capex = st.number_input(
@@ -1283,6 +1299,7 @@ def input_panel(defaults=None):
     return validate({
         "project_name": project_name, "iterations": int(iterations), "capex_delay_correlation": correlation,
         "stochastic_capex": stochastic_capex, "stochastic_delay": stochastic_delay, "stochastic_eoh": stochastic_eoh,
+        "systematic_eoh_error": systematic_eoh_error, "systematic_eoh_error_std": systematic_eoh_error_std,
         "nominal_capex": nominal_capex, "start_year": int(start_year), "start_month": int(start_month),
         "nominal_time_to_cod": int(nominal_time_to_cod), "operational_life": float(operational_life), "capacity": capacity,
         "mean_eoh": st.session_state.mean_eoh, "std_eoh": st.session_state.std_eoh, "mean_eoh_variation": mean_eoh_variation,

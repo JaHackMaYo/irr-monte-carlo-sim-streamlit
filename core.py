@@ -229,6 +229,7 @@ def eoh_generator(
     std_eoh=None,
     stochastic_eoh=True,
     mean_eoh_variation=1.0,
+    systematic_eoh_error=0.0,
 ):
     """
     Generate a monthly EOH (Equivalent Operating Hours) profile for the
@@ -285,7 +286,9 @@ def eoh_generator(
     output = [0.0] * actual_time_to_cod
     for i in range(operational_life_months(operational_life)):
         month = (start_month - 1 + actual_time_to_cod + i) % 12
-        mean = mean_eoh[month] * mean_eoh_variation
+        mean = mean_eoh[month] * mean_eoh_variation * (1.0 + systematic_eoh_error)
+        if mean < 0:
+            raise ValueError("Systematic EOH error produced a negative monthly mean.")
         if stochastic_eoh:
             sigma = mean * std_eoh[month]
             eoh = max(0.0, gauss(mean, sigma))
@@ -641,6 +644,7 @@ def calculate_project_flows(
     irr_tol,
     irr_max_iter,
     wacc,
+    systematic_eoh_error=0.0,
 ):
     """Calculate all technical and financial flows for one project case."""
     mean_eoh = [100.0] * 12 if mean_eoh is None else mean_eoh
@@ -662,6 +666,7 @@ def calculate_project_flows(
         std_eoh,
         stochastic_eoh,
         mean_eoh_variation,
+        systematic_eoh_error,
     )
     unavailabilities, energy_prices, opexes = generate_operating_profiles(
         actual_time_to_cod,
@@ -736,6 +741,7 @@ def simulate_irr(
     irr_tol=1e-10,
     irr_max_iter=1000,
     wacc=WACC,
+    systematic_eoh_error=0.0,
 ):
     """Simulate one project case and return annual IRR, EOH and PBP."""
     result = calculate_project_flows(
@@ -764,6 +770,7 @@ def simulate_irr(
         irr_tol,
         irr_max_iter,
         wacc,
+        systematic_eoh_error,
     )
     return result[:4]
 
@@ -804,9 +811,16 @@ def generate_flows(
     irr_max_iter=IRR_MAX_ITER,
     wacc=WACC,
     delay_cumulative_curve=None,
+    systematic_eoh_error=SYSTEMATIC_EOH_ERROR,
+    systematic_eoh_error_std=SYSTEMATIC_EOH_ERROR_STD,
     capex_variation_cumulative_curve=None,
 ):
     """Sample one case and return its complete technical and financial flows."""
+    if systematic_eoh_error_std < 0:
+        raise ValueError("Systematic EOH error standard deviation cannot be negative.")
+    sampled_systematic_eoh_error = gauss(0.0, systematic_eoh_error_std / 100.0) if systematic_eoh_error else 0.0
+    if sampled_systematic_eoh_error <= -1.0:
+        raise ValueError("Sampled systematic EOH error is less than or equal to -100%.")
     actual_capex = (
         capex_generator(
             nominal_capex,
@@ -859,6 +873,7 @@ def generate_flows(
         irr_tol,
         irr_max_iter,
         wacc,
+        sampled_systematic_eoh_error,
     )
 
 def monte_carlo_irr(
@@ -900,8 +915,12 @@ def monte_carlo_irr(
     irr_max_iter=IRR_MAX_ITER,
     wacc=WACC,
     delay_cumulative_curve=None,
+    systematic_eoh_error=SYSTEMATIC_EOH_ERROR,
+    systematic_eoh_error_std=SYSTEMATIC_EOH_ERROR_STD,
     capex_variation_cumulative_curve=None,
 ):
+    if systematic_eoh_error_std < 0:
+        raise ValueError("Systematic EOH error standard deviation cannot be negative.")
     if stochastic_delay:
         iterations_time_to_cod = time_to_cod_generator(
             nominal_time_to_cod,
@@ -935,6 +954,9 @@ def monte_carlo_irr(
     iterations_irr = []
     iterations_eoh = []
     for actual_capex, actual_time_to_cod in zip(iterations_capex, iterations_time_to_cod):
+        sampled_systematic_eoh_error = gauss(0.0, systematic_eoh_error_std / 100.0) if systematic_eoh_error else 0.0
+        if sampled_systematic_eoh_error <= -1.0:
+            raise ValueError("Sampled systematic EOH error is less than or equal to -100%.")
         actual_irr, actual_eoh, actual_pbp, actual_npv = simulate_irr(
             actual_capex,
             actual_time_to_cod,
@@ -961,6 +983,7 @@ def monte_carlo_irr(
             irr_tol,
             irr_max_iter,
             wacc,
+            sampled_systematic_eoh_error,
         )
         iterations_irr.append(actual_irr)
         iterations_eoh.append(actual_eoh)
@@ -1013,6 +1036,8 @@ def calculate_stiffness(
         mean_eoh=mean_eoh,
         std_eoh=std_eoh,
         stochastic_eoh=False,
+        systematic_eoh_error=False,
+        systematic_eoh_error_std=0.0,
         mean_eoh_variation=mean_eoh_variation,
         unavailability_parameters=unavailability_parameters,
         opex=opex,
@@ -1098,6 +1123,8 @@ def my_irr_mc_function(
     delay_stress=DELAY_STRESS,
     eoh_stress=EOH_STRESS,
     delay_cumulative_curve=None,
+    systematic_eoh_error=SYSTEMATIC_EOH_ERROR,
+    systematic_eoh_error_std=SYSTEMATIC_EOH_ERROR_STD,
     capex_variation_cumulative_curve=None,
 ):
     iterations_irr, iterations_eoh, iterations_time_to_cod, iterations_capex, iterations_bpb, iterations_npv = (
@@ -1140,6 +1167,8 @@ def my_irr_mc_function(
             irr_max_iter,
             wacc,
             delay_cumulative_curve,
+            systematic_eoh_error,
+            systematic_eoh_error_std,
             capex_variation_cumulative_curve,
         )
     )
