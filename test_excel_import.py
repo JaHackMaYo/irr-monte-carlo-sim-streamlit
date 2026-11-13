@@ -81,7 +81,7 @@ def run_checks():
         stochastic_eoh=False,
     )
     assert len(generated[4]) == 24 + 529
-    assert all(len(series) == 24 + 529 for series in generated[4:])
+    assert all(len(series) == 24 + 529 for series in generated[4:-1])
     params = app.input_defaults()
     params["iterations"] = 5
     params["systematic_eoh_error"] = True
@@ -90,6 +90,19 @@ def run_checks():
     without_error = app.run_monte_carlo(dict(params, systematic_eoh_error=False))
     assert with_error.reference_eoh == without_error.reference_eoh
     assert with_error.reference_irr == without_error.reference_irr
+    single_params = dict(params, stochastic_capex=False, stochastic_delay=False, stochastic_eoh=False)
+    single = app.run_single(single_params)
+    assert len(single) == 12 and single[-1] != 0.0
+    single_book = load_workbook(io.BytesIO(app.single_iteration_workbook(single, single_params)), data_only=True)
+    assert single_book["Iteration Results"]["A8"].value == "Systematic EOH Error"
+    assert abs(single_book["Iteration Results"]["B8"].value - single[-1]) < 1e-12
+    single_book.close()
+    assert app.run_single(dict(single_params, systematic_eoh_error=False))[-1] == 0.0
+    mc_book = load_workbook(io.BytesIO(app.monte_carlo_results_workbook(with_error, params)), data_only=True)
+    curves = mc_book["Cumulative Curves"]
+    expected = {"IRR (%)", "IRR Variation (bps)", "NPV (M€)", "PBP (y)", "EOH (h)", "EOH Variation (%)", "Time to COD (m)", "Delay (m)", "CAPEX (M€)", "CAPEX Variation (%)"}
+    assert {curves.cell(1, c).value for c in range(1, curves.max_column + 1) if curves.cell(1, c).value} == expected
+    mc_book.close()
     print("All Excel import regression checks passed.")
 
 

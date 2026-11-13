@@ -847,7 +847,7 @@ def generate_flows(
         if stochastic_delay
         else nominal_time_to_cod
     )
-    return calculate_project_flows(
+    generated = calculate_project_flows(
         actual_capex,
         actual_time_to_cod,
         start_month,
@@ -875,6 +875,7 @@ def generate_flows(
         wacc,
         sampled_systematic_eoh_error,
     )
+    return generated + (sampled_systematic_eoh_error,)
 
 def monte_carlo_irr(
     stochastic_capex=STOCHASTIC_CAPEX,

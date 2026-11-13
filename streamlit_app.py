@@ -788,6 +788,7 @@ def single_iteration_workbook(generated, params):
         revenues,
         taxes,
         opex,
+        systematic_eoh_error,
     ) = generated
 
     capex = np.asarray(capex, dtype=float)
@@ -831,6 +832,7 @@ def single_iteration_workbook(generated, params):
     results_sheet.append(["Actual CAPEX", float(capex.sum()), "M€"])
     results_sheet.append(["Actual Time to COD", actual_time_to_cod, "months"])
     results_sheet.append(["Total EOH", float(actual_eoh), "hours"])
+    results_sheet.append(["Systematic EOH Error", float(systematic_eoh_error), "fraction"])
     results_sheet.freeze_panes = "A2"
     results_sheet.column_dimensions["A"].width = 28
     results_sheet.column_dimensions["B"].width = 18
@@ -841,6 +843,7 @@ def single_iteration_workbook(generated, params):
     results_sheet["B5"].number_format = "0.000"
     results_sheet["B6"].number_format = "0"
     results_sheet["B7"].number_format = "#,##0.00"
+    results_sheet["B8"].number_format = "0.000%"
 
     flows_sheet = workbook.create_sheet("Monthly Flows")
     headers = [
@@ -908,6 +911,82 @@ def single_iteration_workbook(generated, params):
     workbook.close()
     return output.getvalue()
 
+
+def monte_carlo_results_workbook(results, params):
+    """Export the complete inputs, iteration data and all empirical cumulative curves."""
+    workbook = load_workbook(io.BytesIO(params_workbook(params)))
+    summary_sheet = workbook.create_sheet("Monte Carlo Summary")
+    summary_sheet.append(["Metric", "Reference", "Mean", "Median", "P5", "P95"])
+    summary_specs = [
+        ("IRR (%)", np.asarray(results.iterations_irr) * 100.0, results.reference_irr * 100.0),
+        ("NPV (M€)", results.iterations_npv, results.reference_npv),
+        ("PBP (y)", results.iterations_bpb, results.reference_bpb),
+        ("EOH (h)", results.iterations_eoh, results.reference_eoh),
+        ("Time to COD (m)", results.iterations_time_to_cod, results.reference_time_to_cod),
+        ("CAPEX (M€)", results.iterations_capex, results.reference_capex),
+    ]
+    for label, raw_values, reference in summary_specs:
+        values = finite(raw_values)
+        summary_sheet.append([label, float(reference), float(np.mean(values)), float(np.median(values)), float(np.percentile(values, 5)), float(np.percentile(values, 95))])
+    summary_sheet.append([])
+    summary_sheet.append(["Stiffness", "Value"])
+    summary_sheet.append(["Delay Stiffness", float(results.delay_stiffness)])
+    summary_sheet.append(["CAPEX Stiffness", float(results.capex_stiffness)])
+    summary_sheet.append(["EOH Stiffness", float(results.eoh_stiffness)])
+    summary_sheet.freeze_panes = "A2"
+    summary_sheet.column_dimensions["A"].width = 28
+
+    curves = [
+        ("IRR (%)", np.asarray(results.iterations_irr) * 100.0),
+        ("IRR Variation (bps)", results.irr_variations),
+        ("NPV (M€)", results.iterations_npv),
+        ("PBP (y)", results.iterations_bpb),
+        ("EOH (h)", results.iterations_eoh),
+        ("EOH Variation (%)", results.eoh_variations),
+        ("Time to COD (m)", results.iterations_time_to_cod),
+        ("Delay (m)", results.delays),
+        ("CAPEX (M€)", results.iterations_capex),
+        ("CAPEX Variation (%)", results.capex_variations),
+    ]
+    curves_sheet = workbook.create_sheet("Cumulative Curves")
+    for curve_index, (label, raw_values) in enumerate(curves):
+        column = curve_index * 3 + 1
+        values = np.sort(finite(raw_values))
+        cumulative = np.arange(1, len(values) + 1, dtype=float) / len(values)
+        curves_sheet.cell(1, column, label)
+        curves_sheet.cell(2, column, "Value")
+        curves_sheet.cell(2, column + 1, "Cumulative Probability")
+        for row, (value, probability) in enumerate(zip(values, cumulative), 3):
+            curves_sheet.cell(row, column, float(value))
+            curves_sheet.cell(row, column + 1, float(probability)).number_format = "0.0000%"
+        curves_sheet.column_dimensions[curves_sheet.cell(1, column).column_letter].width = 23
+        curves_sheet.column_dimensions[curves_sheet.cell(1, column + 1).column_letter].width = 24
+    curves_sheet.freeze_panes = "A3"
+
+    iterations_sheet = workbook.create_sheet("Iterations")
+    columns = [
+        ("Iteration", np.arange(1, len(results.iterations_irr) + 1)),
+        ("IRR", results.iterations_irr), ("IRR Variation (bps)", results.irr_variations),
+        ("NPV (M€)", results.iterations_npv), ("PBP (y)", results.iterations_bpb),
+        ("EOH (h)", results.iterations_eoh), ("EOH Variation (%)", results.eoh_variations),
+        ("Time to COD (m)", results.iterations_time_to_cod), ("Delay (m)", results.delays),
+        ("CAPEX (M€)", results.iterations_capex), ("CAPEX Variation (%)", results.capex_variations),
+        ("Linear IRR Variation (bps)", results.linear_irr_variations),
+    ]
+    iterations_sheet.append([label for label, _ in columns])
+    for row in zip(*(np.asarray(values).tolist() for _, values in columns)):
+        iterations_sheet.append(list(row))
+    iterations_sheet.freeze_panes = "A2"
+    iterations_sheet.auto_filter.ref = iterations_sheet.dimensions
+    for column, (label, _) in enumerate(columns, 1):
+        iterations_sheet.column_dimensions[iterations_sheet.cell(1, column).column_letter].width = max(12, min(30, len(label) + 3))
+    for row in range(2, iterations_sheet.max_row + 1):
+        iterations_sheet.cell(row, 2).number_format = "0.0000%"
+
+    output = io.BytesIO()
+    workbook.save(output)
+    workbook.close()
+    return output.getvalue()
 
 def validate(params):
     if params["iterations"] <= 0:
@@ -1375,11 +1454,11 @@ def results_tabs(results):
         show_plotly(fig,"scatter")
 
 def single_iteration_view(generated, params):
-    irr, actual_eoh, pbp, npv, capex, eoh, unavailability, price, revenues, taxes, opex = generated
+    irr, actual_eoh, pbp, npv, capex, eoh, unavailability, price, revenues, taxes, opex, systematic_eoh_error = generated
     arrays = [np.asarray(v,float) for v in (capex,eoh,unavailability,price,revenues,taxes,opex)]
     capex,eoh,unavailability,price,revenues,taxes,opex = arrays
     total=len(capex); cod=total-operational_life_months(params["operational_life"]); months=np.arange(1,total+1); net=-capex+revenues-opex-taxes; cumulative=np.cumsum(net)
-    c=st.columns(6); c[0].metric("IRR",f"{irr:.2%}"); c[1].metric("NPV",f"{npv:.2f} M€"); c[2].metric("PBP",f"{pbp:.2f} y"); c[3].metric("Actual CAPEX",f"{capex.sum():.2f} M€"); c[4].metric("Actual Time to COD",f"{cod} m"); c[5].metric("Total EOH",f"{actual_eoh:,.0f} h")
+    c=st.columns(7); c[0].metric("Systematic EOH Error",f"{systematic_eoh_error:.3%}"); c[1].metric("IRR",f"{irr:.2%}"); c[2].metric("NPV",f"{npv:.2f} M€"); c[3].metric("PBP",f"{pbp:.2f} y"); c[4].metric("Actual CAPEX",f"{capex.sum():.2f} M€"); c[5].metric("Actual Time to COD",f"{cod} m"); c[6].metric("Total EOH",f"{actual_eoh:,.0f} h")
     st.download_button(
         "Download Single Iteration Excel",
         single_iteration_workbook(generated, params),
@@ -1745,6 +1824,14 @@ def main():
             if st.session_state.results is not None:
                 st.markdown("## Simulation Summary")
                 summary(st.session_state.results)
+                st.download_button(
+                    "Download Monte Carlo Results Excel",
+                    monte_carlo_results_workbook(st.session_state.results, st.session_state.monte_carlo_params),
+                    "monte_carlo_results.xlsx",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    key="download_monte_carlo_results_excel",
+                )
                 results_tabs(st.session_state.results)
             else:
                 st.info("Run the Monte Carlo simulation to display its results.")
