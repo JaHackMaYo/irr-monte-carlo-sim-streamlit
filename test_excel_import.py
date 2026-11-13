@@ -93,6 +93,11 @@ def run_checks():
     single_params = dict(params, stochastic_capex=False, stochastic_delay=False, stochastic_eoh=False)
     single = app.run_single(single_params)
     assert len(single) == 12 and single[-1] != 0.0
+    try:
+        app.validate_single_iteration_result(single[:-1])
+        raise AssertionError("Legacy result was not rejected")
+    except ValueError as exc:
+        assert "Run Single Iteration again" in str(exc)
     single_book = load_workbook(io.BytesIO(app.single_iteration_workbook(single, single_params)), data_only=True)
     assert single_book["Iteration Results"]["A8"].value == "Systematic EOH Error"
     assert abs(single_book["Iteration Results"]["B8"].value - single[-1]) < 1e-12

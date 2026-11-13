@@ -193,6 +193,14 @@ def init_state():
             st.session_state[key] = value
 
 
+
+    # Streamlit sessions may survive a deployment. Discard a cached result
+    # created by the previous 11-field single-iteration contract.
+    cached_single = st.session_state.get("single_iteration")
+    if cached_single is not None and len(cached_single) != 12:
+        st.session_state.single_iteration = None
+        st.session_state.single_iteration_params = None
+
 def finite(values):
     values = np.asarray(values, dtype=float)
     return values[np.isfinite(values)]
@@ -774,8 +782,18 @@ def input_defaults():
         "irr_max_iter": int(IRR_MAX_ITER),
     }
 
+def validate_single_iteration_result(generated):
+    """Validate the tuple contract used by the single-iteration UI and export."""
+    if generated is None or len(generated) != 12:
+        raise ValueError(
+            "Obsolete single-iteration result detected. Run Single Iteration again "
+            "to regenerate it with the current application version."
+        )
+    return generated
+
 def single_iteration_workbook(generated, params):
     """Export inputs, active profiles, visible results and all monthly series."""
+    generated = validate_single_iteration_result(generated)
     (
         irr,
         actual_eoh,
@@ -1454,6 +1472,7 @@ def results_tabs(results):
         show_plotly(fig,"scatter")
 
 def single_iteration_view(generated, params):
+    generated = validate_single_iteration_result(generated)
     irr, actual_eoh, pbp, npv, capex, eoh, unavailability, price, revenues, taxes, opex, systematic_eoh_error = generated
     arrays = [np.asarray(v,float) for v in (capex,eoh,unavailability,price,revenues,taxes,opex)]
     capex,eoh,unavailability,price,revenues,taxes,opex = arrays
