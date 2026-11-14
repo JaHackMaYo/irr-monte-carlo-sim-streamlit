@@ -35,7 +35,27 @@ def edited_workbook(life, active_profiles=True, numeric_as_text=False):
     return Upload(output.getvalue())
 
 
+def check_project_filenames():
+    assert app.project_excel_filename("My Project", "monte_carlo_results") == "My_Project_monte_carlo_results.xlsx"
+    assert app.project_excel_filename("Wind / PV: Austria?", "single_iteration_results") == "Wind_PV_Austria_single_iteration_results.xlsx"
+    assert app.project_excel_filename("", "irr_inputs_template") == "Project_irr_inputs_template.xlsx"
+    expected_suffixes = {
+        "irr_inputs_template",
+        "energy_price_profile",
+        "opex_profile",
+        "unavailability_profile",
+        "delay_cumulative_curve",
+        "capex_variation_cumulative_curve",
+        "single_iteration_results",
+        "monte_carlo_results",
+    }
+    for suffix in expected_suffixes:
+        filename = app.project_excel_filename("Test Project", suffix)
+        assert filename == f"Test_Project_{suffix}.xlsx"
+        assert filename.endswith(".xlsx")
+
 def run_checks():
+    check_project_filenames()
     for life in (20, 35, 44.04, 44.08):
         inputs, profiles, flags, report = app.load_params_workbook(
             edited_workbook(life, active_profiles=True)

@@ -206,6 +206,23 @@ def finite(values):
     return values[np.isfinite(values)]
 
 
+def project_excel_filename(project_name, descriptor):
+    """Build a safe Excel filename prefixed by the current project name."""
+    raw_name = str(project_name or "").strip()
+    if not raw_name:
+        raw_name = "Project"
+    safe_name = "".join(
+        character if character.isalnum() or character in {"-", "_"} else "_"
+        for character in raw_name
+    )
+    safe_name = "_".join(part for part in safe_name.split("_") if part).strip("._-")
+    if not safe_name:
+        safe_name = "Project"
+    safe_descriptor = "_".join(
+        part for part in str(descriptor).strip().replace(" ", "_").split("_") if part
+    )
+    return f"{safe_name}_{safe_descriptor}.xlsx"
+
 def parse_profile(uploaded, profile_name):
     if uploaded is None:
         return None
@@ -1199,7 +1216,7 @@ def input_panel(defaults=None):
         st.download_button(
             "Download Energy Price Excel",
             profile_workbook("Energy Price", "EUR/MWh", e_values),
-            "energy_price_profile.xlsx",
+            project_excel_filename(project_name, "energy_price_profile"),
         )
         price_months = np.arange(1, len(e_values) + 1)
         fig = go.Figure(go.Scatter(x=price_months, y=e_values, name="Energy Price from Excel" if st.session_state.energy_price_profile is not None else "Energy Price Model", mode="lines", line=dict(color=CHART_BLUE, width=3), hovertemplate="Operating month %{x}<br>Price: %{y:.2f} EUR/MWh<extra></extra>"))
@@ -1229,7 +1246,7 @@ def input_panel(defaults=None):
         st.download_button(
             "Download OPEX Excel",
             profile_workbook("OPEX", "M€/month", o_values),
-            "opex_profile.xlsx",
+            project_excel_filename(project_name, "opex_profile"),
         )
         opex_months = np.arange(1, len(o_values) + 1)
         fig = go.Figure(go.Scatter(x=opex_months, y=o_values, name="OPEX from Excel" if st.session_state.opex_profile is not None else "OPEX Model", mode="lines", # fill="tozeroy",
@@ -1283,7 +1300,7 @@ def input_panel(defaults=None):
         st.download_button(
             "Download Unavailability Excel",
             profile_workbook("Unavailability", "%", np.asarray(u_values) * 100),
-            "unavailability_profile.xlsx",
+            project_excel_filename(project_name, "unavailability_profile"),
         )
         unavailability_months = np.arange(1, len(u_values) + 1)
         fig = go.Figure(go.Scatter(x=unavailability_months, y=np.asarray(u_values) * 100, name="Unavailability from Excel" if st.session_state.unavailability_profile is not None else "Unavailability Model", mode="lines", line=dict(color=CHART_BLUE, width=3), hovertemplate="Operating month %{x}<br>Unavailability: %{y:.2f}%<extra></extra>"))
@@ -1321,7 +1338,7 @@ def input_panel(defaults=None):
             st.download_button(
                 "Download Delay Curve Template",
                 cumulative_curve_workbook("Delay (m)", [(delay_min, 0), (delay_ml, 50), (delay_max, 100)]),
-                "delay_cumulative_curve.xlsx",
+                project_excel_filename(project_name, "delay_cumulative_curve"),
                 key="download_delay_curve_template",
             )
             if stochastic_delay:
@@ -1342,7 +1359,7 @@ def input_panel(defaults=None):
             st.download_button(
                 "Download CAPEX Variation Curve Template",
                 cumulative_curve_workbook("CAPEX Variation (%)", [(capex_min, 0), (capex_ml, 50), (capex_max, 100)]),
-                "capex_variation_cumulative_curve.xlsx",
+                project_excel_filename(project_name, "capex_variation_cumulative_curve"),
                 key="download_capex_curve_template",
             )
             if stochastic_capex:
@@ -1481,7 +1498,7 @@ def single_iteration_view(generated, params):
     st.download_button(
         "Download Single Iteration Excel",
         single_iteration_workbook(generated, params),
-        "single_iteration_results.xlsx",
+        project_excel_filename(params.get("project_name"), "single_iteration_results"),
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
         key="download_single_iteration_excel",
@@ -1719,7 +1736,7 @@ def main():
             st.download_button(
                 "Download Input Template",
                 params_workbook(template_params),
-                "irr_inputs_template.xlsx",
+                project_excel_filename(template_params.get("project_name"), "irr_inputs_template"),
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
                 key="download_input_template",
@@ -1846,7 +1863,7 @@ def main():
                 st.download_button(
                     "Download Monte Carlo Results Excel",
                     monte_carlo_results_workbook(st.session_state.results, st.session_state.monte_carlo_params),
-                    "monte_carlo_results.xlsx",
+                    project_excel_filename(st.session_state.monte_carlo_params.get("project_name"), "monte_carlo_results"),
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True,
                     key="download_monte_carlo_results_excel",
