@@ -1,5 +1,6 @@
 """Regression checks for the complete Excel input import."""
 import io
+import numpy as np
 from openpyxl import load_workbook
 import streamlit_app as app
 
@@ -54,8 +55,20 @@ def check_project_filenames():
         assert filename == f"Test_Project_{suffix}.xlsx"
         assert filename.endswith(".xlsx")
 
+def check_summary_statistics():
+    mean, std, cv, median, p5, p95 = app.summary_statistics([1.0, 2.0, 3.0])
+    assert abs(mean - 2.0) < 1e-12
+    assert abs(std - np.sqrt(2.0 / 3.0)) < 1e-12
+    assert abs(cv - std / 2.0) < 1e-12
+    assert median == 2.0
+    assert abs(p5 - 1.1) < 1e-12
+    assert abs(p95 - 2.9) < 1e-12
+    assert np.isnan(app.summary_statistics([-1.0, 1.0])[2])
+
+
 def run_checks():
     check_project_filenames()
+    check_summary_statistics()
     for life in (20, 35, 44.04, 44.08):
         inputs, profiles, flags, report = app.load_params_workbook(
             edited_workbook(life, active_profiles=True)

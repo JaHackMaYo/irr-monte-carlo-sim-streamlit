@@ -152,6 +152,8 @@ st.markdown(f"""
 .status-error {{background:#F1F2F1; color:#4B514D; border:1px solid {BORDER}; padding:7px 11px; border-radius:8px; font-weight:600;}}
 div[data-testid="stMetric"] {{background:{CARD}; border:1px solid {BORDER}; padding:13px; border-radius:9px;}}
 div[data-testid="stMetricValue"] {{color:{GREEN};}}
+div[data-testid="stMetricLabel"] p {{font-size:0.76rem; line-height:1.05rem; white-space:nowrap;}}
+div[data-testid="stMetricValue"] {{font-size:1.18rem;}}
 .stButton>button, .stDownloadButton>button {{background:{CARD}; color:{GREEN}; border:1px solid {GREEN}; border-radius:8px;}}
 .stButton>button:hover, .stDownloadButton>button:hover {{background:{LIGHT_GREEN}; color:{HEADER}; border-color:{HEADER};}}
 .stButton>button[kind="primary"] {{background:{GREEN}; color:white; border-color:{GREEN};}}
@@ -1442,20 +1444,33 @@ def run_single(params):
     return generate_flows(**{k: v for k, v in params.items() if k in accepted})
 
 
-def summary(results):
-    irr, pbp, npv = finite(results.iterations_irr), finite(results.iterations_bpb), finite(results.iterations_npv)
-    metrics = [
-        ("Reference IRR", f"{results.reference_irr:.2%}"), ("Mean IRR", f"{np.mean(irr):.2%}"),
-        ("Median IRR", f"{np.median(irr):.2%}"), ("P5 IRR", f"{np.percentile(irr,5):.2%}"), ("P95 IRR", f"{np.percentile(irr,95):.2%}"),
-        ("Reference NPV", f"{results.reference_npv:.2f} M€"), ("Mean NPV", f"{np.mean(npv):.2f} M€"),
-        ("Median NPV", f"{np.median(npv):.2f} M€"), ("P5 NPV", f"{np.percentile(npv,5):.2f} M€"), ("P95 NPV", f"{np.percentile(npv,95):.2f} M€"),
-        ("Reference PBP", f"{results.reference_bpb:.2f} y"), ("Mean PBP", f"{np.mean(pbp):.2f} y"),
-        ("Median PBP", f"{np.median(pbp):.2f} y"), ("P5 PBP", f"{np.percentile(pbp,5):.2f} y"), ("P95 PBP", f"{np.percentile(pbp,95):.2f} y"),
-        ("Delay Stiffness", f"{results.delay_stiffness:.0f}"), ("CAPEX Stiffness", f"{results.capex_stiffness:.0f}"), ("EOH Stiffness", f"{results.eoh_stiffness:.0f}"),
-    ]
-    cols = st.columns(5)
-    for i, (label, value) in enumerate(metrics): cols[i % 5].metric(label, value)
+def summary_statistics(values):
+    """Return mean, population standard deviation, CV, median, P5 and P95."""
+    values = finite(values)
+    if values.size == 0:
+        return (math.nan,) * 6
+    mean = float(np.mean(values))
+    standard_deviation = float(np.std(values, ddof=0))
+    coefficient_of_variation = standard_deviation / abs(mean) if not math.isclose(mean, 0.0, abs_tol=1e-15) else math.nan
+    return mean, standard_deviation, coefficient_of_variation, float(np.median(values)), float(np.percentile(values, 5)), float(np.percentile(values, 95))
 
+
+def summary(results):
+    summary_rows = [
+        ("IRR", finite(results.iterations_irr), results.reference_irr, lambda value: f"{value:.2%}"),
+        ("NPV", finite(results.iterations_npv), results.reference_npv, lambda value: f"{value:.2f} M€"),
+        ("PBP", finite(results.iterations_bpb), results.reference_bpb, lambda value: f"{value:.2f} y"),
+    ]
+    for variable, values, reference, value_format in summary_rows:
+        mean, standard_deviation, coefficient_of_variation, median, p5, p95 = summary_statistics(values)
+        row = [(f"Reference {variable}", value_format(reference)), (f"Mean {variable}", value_format(mean)), (f"Std. Dev. {variable}", value_format(standard_deviation)), (f"CV {variable}", f"{coefficient_of_variation:.2%}"), (f"Median {variable}", value_format(median)), (f"P5 {variable}", value_format(p5)), (f"P95 {variable}", value_format(p95))]
+        columns = st.columns(7)
+        for column, (label, value) in zip(columns, row):
+            column.metric(label, value)
+    stiffness_columns = st.columns(3)
+    stiffness_columns[0].metric("Delay Stiffness", f"{results.delay_stiffness:.0f}")
+    stiffness_columns[1].metric("CAPEX Stiffness", f"{results.capex_stiffness:.0f}")
+    stiffness_columns[2].metric("EOH Stiffness", f"{results.eoh_stiffness:.0f}")
 
 def results_tabs(results):
     t1, t2, t3, t4 = st.tabs(["IRR, NPV & PBP Histograms", "Monte Carlo vs Linear Model", "Other Histograms", "Scatter Plot"])
