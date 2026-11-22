@@ -645,19 +645,31 @@ def calculate_project_flows(
     irr_max_iter,
     wacc,
     systematic_eoh_error=0.0,
+    nominal_time_to_cod=None,
+    prevent_capex_curve_extension=False,
 ):
-    """Calculate all technical and financial flows for one project case."""
+    """Calculate all technical and financial flows for one project case.
+
+    Positive delays can postpone COD without stretching the nominal CAPEX curve.
+    Negative delays still compress the curve to the actual construction duration.
+    """
     mean_eoh = [100.0] * 12 if mean_eoh is None else mean_eoh
     std_eoh = [0.1] * 12 if std_eoh is None else std_eoh
     if unavailability_parameters is None:
         unavailability_parameters = [15, 3, 12, 0.01]
 
-    capex_flows = distribute_capex(
-        actual_capex,
-        actual_time_to_cod,
-        capex_curve_inflection,
-        capex_curve_steepness,
-    ) + [0.0] * operational_life_months(operational_life)
+    if nominal_time_to_cod is None:
+        nominal_time_to_cod = actual_time_to_cod
+    capex_curve_duration = (
+        min(int(actual_time_to_cod), int(nominal_time_to_cod))
+        if prevent_capex_curve_extension
+        else int(actual_time_to_cod)
+    )
+    capex_flows = (
+        distribute_capex(actual_capex, capex_curve_duration, capex_curve_inflection, capex_curve_steepness)
+        + [0.0] * (int(actual_time_to_cod) - capex_curve_duration)
+        + [0.0] * operational_life_months(operational_life)
+    )
     eoh = eoh_generator(
         start_month,
         actual_time_to_cod,
@@ -742,6 +754,8 @@ def simulate_irr(
     irr_max_iter=1000,
     wacc=WACC,
     systematic_eoh_error=0.0,
+    nominal_time_to_cod=None,
+    prevent_capex_curve_extension=False,
 ):
     """Simulate one project case and return annual IRR, EOH and PBP."""
     result = calculate_project_flows(
@@ -771,6 +785,8 @@ def simulate_irr(
         irr_max_iter,
         wacc,
         systematic_eoh_error,
+        nominal_time_to_cod,
+        prevent_capex_curve_extension,
     )
     return result[:4]
 
@@ -814,6 +830,7 @@ def generate_flows(
     systematic_eoh_error=SYSTEMATIC_EOH_ERROR,
     systematic_eoh_error_std=SYSTEMATIC_EOH_ERROR_STD,
     capex_variation_cumulative_curve=None,
+    prevent_capex_curve_extension=PREVENT_CAPEX_CURVE_EXTENSION,
 ):
     """Sample one case and return its complete technical and financial flows."""
     if systematic_eoh_error_std < 0:
@@ -874,6 +891,8 @@ def generate_flows(
         irr_max_iter,
         wacc,
         sampled_systematic_eoh_error,
+        nominal_time_to_cod,
+        prevent_capex_curve_extension,
     )
     return generated + (sampled_systematic_eoh_error,)
 
@@ -919,6 +938,7 @@ def monte_carlo_irr(
     systematic_eoh_error=SYSTEMATIC_EOH_ERROR,
     systematic_eoh_error_std=SYSTEMATIC_EOH_ERROR_STD,
     capex_variation_cumulative_curve=None,
+    prevent_capex_curve_extension=PREVENT_CAPEX_CURVE_EXTENSION,
 ):
     if systematic_eoh_error_std < 0:
         raise ValueError("Systematic EOH error standard deviation cannot be negative.")
@@ -985,6 +1005,8 @@ def monte_carlo_irr(
             irr_max_iter,
             wacc,
             sampled_systematic_eoh_error,
+            nominal_time_to_cod,
+            prevent_capex_curve_extension,
         )
         iterations_irr.append(actual_irr)
         iterations_eoh.append(actual_eoh)
@@ -1020,6 +1042,7 @@ def calculate_stiffness(
     capex_stress=CAPEX_STRESS,
     delay_stress=DELAY_STRESS,
     eoh_stress=EOH_STRESS,
+    prevent_capex_curve_extension=PREVENT_CAPEX_CURVE_EXTENSION,
 ):
     """Calculate the current reference case and the three IRR stiffnesses."""
     if capex_stress == 0 or delay_stress == 0 or eoh_stress == 0:
@@ -1055,6 +1078,7 @@ def calculate_stiffness(
         irr_tol=irr_tol,
         irr_max_iter=irr_max_iter,
         wacc=wacc,
+        prevent_capex_curve_extension=prevent_capex_curve_extension,
     )
     reference = monte_carlo_irr(**common)
     capex_result = monte_carlo_irr(
@@ -1127,6 +1151,7 @@ def my_irr_mc_function(
     systematic_eoh_error=SYSTEMATIC_EOH_ERROR,
     systematic_eoh_error_std=SYSTEMATIC_EOH_ERROR_STD,
     capex_variation_cumulative_curve=None,
+    prevent_capex_curve_extension=PREVENT_CAPEX_CURVE_EXTENSION,
 ):
     iterations_irr, iterations_eoh, iterations_time_to_cod, iterations_capex, iterations_bpb, iterations_npv = (
         monte_carlo_irr(
@@ -1171,6 +1196,7 @@ def my_irr_mc_function(
             systematic_eoh_error,
             systematic_eoh_error_std,
             capex_variation_cumulative_curve,
+            prevent_capex_curve_extension,
         )
     )
     (
@@ -1211,6 +1237,7 @@ def my_irr_mc_function(
         capex_stress=capex_stress,
         delay_stress=delay_stress,
         eoh_stress=eoh_stress,
+        prevent_capex_curve_extension=prevent_capex_curve_extension,
     )
     irr_variations = [(i - reference_irr) * 100 * 100 for i in iterations_irr]
     capex_variations = [(i - reference_capex) / reference_capex * 100 for i in iterations_capex]

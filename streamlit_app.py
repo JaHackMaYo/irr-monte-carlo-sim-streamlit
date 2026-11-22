@@ -333,6 +333,7 @@ BOOLEAN_INPUT_KEYS = {
     "stochastic_delay",
     "stochastic_eoh",
     "systematic_eoh_error",
+    "prevent_capex_curve_extension",
 }
 INTEGER_INPUT_KEYS = {
     "iterations",
@@ -758,6 +759,7 @@ def input_defaults():
         "capex_delay_correlation": float(CAPEX_DELAY_CORRELATION),
         "stochastic_capex": bool(STOCHASTIC_CAPEX),
         "stochastic_delay": bool(STOCHASTIC_DELAY),
+        "prevent_capex_curve_extension": bool(PREVENT_CAPEX_CURVE_EXTENSION),
         "stochastic_eoh": bool(STOCHASTIC_EOH),
         "systematic_eoh_error": bool(SYSTEMATIC_EOH_ERROR),
         "systematic_eoh_error_std": float(SYSTEMATIC_EOH_ERROR_STD),
@@ -1074,6 +1076,12 @@ def input_panel(defaults=None):
         stochastic_delay = st.toggle(
             "Simulate Stochastic Delay", bool(d("stochastic_delay", STOCHASTIC_DELAY))
         , key=k("simulate_stochastic_delay"))
+        prevent_capex_curve_extension = st.toggle(
+            "Prevent positive delays from extending the CAPEX curve",
+            bool(d("prevent_capex_curve_extension", PREVENT_CAPEX_CURVE_EXTENSION)),
+            help="Positive delays postpone COD but keep the CAPEX curve at its nominal duration. Negative delays still compress it.",
+            key=k("prevent_capex_curve_extension"),
+        )
         stochastic_eoh = st.toggle(
             "Simulate Stochastic EOH", bool(d("stochastic_eoh", STOCHASTIC_EOH))
         , key=k("simulate_stochastic_eoh"))
@@ -1414,7 +1422,8 @@ def input_panel(defaults=None):
 
     return validate({
         "project_name": project_name, "iterations": int(iterations), "capex_delay_correlation": correlation,
-        "stochastic_capex": stochastic_capex, "stochastic_delay": stochastic_delay, "stochastic_eoh": stochastic_eoh,
+        "stochastic_capex": stochastic_capex, "stochastic_delay": stochastic_delay,
+        "prevent_capex_curve_extension": prevent_capex_curve_extension, "stochastic_eoh": stochastic_eoh,
         "systematic_eoh_error": systematic_eoh_error, "systematic_eoh_error_std": systematic_eoh_error_std,
         "nominal_capex": nominal_capex, "start_year": int(start_year), "start_month": int(start_month),
         "nominal_time_to_cod": int(nominal_time_to_cod), "operational_life": float(operational_life), "capacity": capacity,

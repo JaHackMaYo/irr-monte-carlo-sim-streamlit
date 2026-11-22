@@ -102,6 +102,7 @@ def run_checks():
     assert reloaded["nominal_capex"] == 75.5
     assert reloaded["systematic_eoh_error"] is False
     assert reloaded["systematic_eoh_error_std"] == 5.0
+    assert reloaded["prevent_capex_curve_extension"] is False
 
     assert app.operational_life_months(44.0) == 528
     assert app.operational_life_months(44.04) == 528
