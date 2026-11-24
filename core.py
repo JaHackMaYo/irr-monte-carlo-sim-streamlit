@@ -1084,15 +1084,48 @@ def calculate_stiffness(
     capex_result = monte_carlo_irr(
         **dict(common, nominal_capex=nominal_capex * (1 + capex_stress / 100.0))
     )
-    delay_result = monte_carlo_irr(
-        **dict(common, nominal_time_to_cod=int(round(nominal_time_to_cod + delay_stress)))
+    stressed_time_to_cod = int(round(nominal_time_to_cod + delay_stress))
+    if stressed_time_to_cod <= 0:
+        raise ValueError("Nominal Time to COD plus delay stress must be greater than zero")
+
+    # Apply the stress to actual COD while preserving the original nominal
+    # duration as the CAPEX-curve reference.
+    delay_irr, _, _, _ = simulate_irr(
+        actual_capex=nominal_capex,
+        actual_time_to_cod=stressed_time_to_cod,
+        start_month=start_month,
+        capex_curve_inflection=capex_curve_inflection,
+        capex_curve_steepness=capex_curve_steepness,
+        operational_life=operational_life,
+        mean_eoh=mean_eoh,
+        std_eoh=std_eoh,
+        stochastic_eoh=False,
+        mean_eoh_variation=mean_eoh_variation,
+        unavailability_parameters=unavailability_parameters,
+        opex=opex,
+        capacity=capacity,
+        energy_price_at_cod=energy_price_at_cod,
+        annual_price_variation=annual_price_variation,
+        energy_price_profile=energy_price_profile,
+        unavailability_profile=unavailability_profile,
+        opex_profile=opex_profile,
+        tax_rate=tax_rate,
+        capex_depreciation_ratio=capex_depreciation_ratio,
+        capex_depreciation_time=capex_depreciation_time,
+        irr_guess=irr_guess,
+        irr_tol=irr_tol,
+        irr_max_iter=irr_max_iter,
+        wacc=wacc,
+        systematic_eoh_error=0.0,
+        nominal_time_to_cod=int(round(nominal_time_to_cod)),
+        prevent_capex_curve_extension=prevent_capex_curve_extension,
     )
     eoh_result = monte_carlo_irr(
         **dict(common, mean_eoh_variation=mean_eoh_variation * (1 + eoh_stress / 100.0))
     )
     reference_irr = reference[0][0]
     capex_stiffness = round((capex_result[0][0] - reference_irr) * 10000 / capex_stress)
-    delay_stiffness = round((delay_result[0][0] - reference_irr) * 10000 / delay_stress)
+    delay_stiffness = (delay_irr - reference_irr) * 10000 / delay_stress
     eoh_stiffness = round((eoh_result[0][0] - reference_irr) * 10000 / eoh_stress)
     return (
         delay_stiffness,
